@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: youtube-summarizer-backend
+    env: python
+    region: oregon
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    repo: <leave blank for UI selection>
+    branch: main
+    plan: free
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
