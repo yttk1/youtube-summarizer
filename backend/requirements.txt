@@ -1,7 +1,6 @@
 fastapi
 uvicorn[standard]
 youtube-transcript-api
-yt-dlp
 openai
 httpx
 python-multipart
