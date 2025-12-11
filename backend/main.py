@@ -19,7 +19,7 @@ from youtube_transcript_api._errors import (
     VideoUnavailable,
     CouldNotRetrieveTranscript,
 )
-import yt_dlp
+# import yt_dlp
 
 # -------------------------
 # Configuration
@@ -98,18 +98,37 @@ async def fetch_transcript(video_id: str, languages: List[str] | None = None):
 # -------------------------
 # Non-blocking metadata fetch via yt-dlp
 # -------------------------
-def fetch_video_metadata_sync(video_id: str) -> Dict[str, Any]:
-    ydl_opts = {"quiet": True, "skip_download": True}
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video_id, download=False)
-    return {"title": info.get("title"), "channel": info.get("uploader"), "duration": info.get("duration", 0)}
+# def fetch_video_metadata_sync(video_id: str) -> Dict[str, Any]:
+#     ydl_opts = {"quiet": True, "skip_download": True}
+#     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+#         info = ydl.extract_info(video_id, download=False)
+#     return {"title": info.get("title"), "channel": info.get("uploader"), "duration": info.get("duration", 0)}
 
+# async def fetch_video_metadata(video_id: str) -> Dict[str, Any]:
+#     loop = asyncio.get_event_loop()
+#     try:
+#         return await loop.run_in_executor(None, lambda: fetch_video_metadata_sync(video_id))
+#     except Exception as e:
+#         raise RuntimeError(f"MetadataFetchFailed: {e}") from e
+
+
+# -------------------------
+# Metadata via YouTube oEmbed (NO yt-dlp, SAFE, no cookies)
+# -------------------------
 async def fetch_video_metadata(video_id: str) -> Dict[str, Any]:
-    loop = asyncio.get_event_loop()
-    try:
-        return await loop.run_in_executor(None, lambda: fetch_video_metadata_sync(video_id))
-    except Exception as e:
-        raise RuntimeError(f"MetadataFetchFailed: {e}") from e
+    url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+
+    async with httpx.AsyncClient() as client:
+        r = await client.get(url)
+        if r.status_code != 200:
+            raise RuntimeError(f"MetadataFetchFailed: {r.text}")
+
+    data = r.json()
+    return {
+        "title": data.get("title"),
+        "channel": data.get("author_name"),
+        "duration": None  # oEmbed doesn't give duration but it's optional
+    }
 
 # -------------------------
 # OpenAI Responses API helper (async)
