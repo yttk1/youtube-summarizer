@@ -1,4 +1,5 @@
 import React, { useState, useRef } from "react";
+const API_BASE = import.meta.env.VITE_API_BASE;
 
 /*
   Polished YouTube Summarizer App.jsx
@@ -130,7 +131,7 @@ export default function App() {
     if (!url) return setError("Please paste a YouTube URL.");
     setLoading(true);
     try {
-      const res = await fetch("/api/analyze", {
+      const res = await fetch(`${API_BASE}/api/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
@@ -169,7 +170,7 @@ export default function App() {
     setChatHistory(history);
     chatRef.current.value = "";
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url, history }),
