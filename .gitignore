@@ -1,2 +1,6 @@
 .env
 frontend/dist/config.json
+.env
+
+# secrets
+.env
