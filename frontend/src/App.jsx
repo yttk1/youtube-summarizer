@@ -2,6 +2,20 @@ import React, { useEffect, useState, useRef } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE;
 
+/* helper: extract id from YouTube url */
+function extractIdFromUrl(url) {
+  if (!url) return "";
+  try {
+    const m = url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+    if (m) return m[1];
+    const m2 = url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+    if (m2) return m2[1];
+    const m3 = url.match(/\/embed\/([A-Za-z0-9_-]{11})/);
+    if (m3) return m3[1];
+  } catch {}
+  return "";
+}
+
 /* ---------- Icons ---------- */
 
 function IconCopy() {
@@ -84,25 +98,6 @@ function PillTab({ active, label, onClick }) {
   );
 }
 
-function ModeSwitch({ active, label, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      className={`relative px-2 pb-2 pt-1 text-sm font-medium text-center transition ${
-        active ? "text-white" : "text-slate-400 hover:text-slate-200"
-      }`}
-    >
-      <div
-        className={`pb-2 border-b-2 ${
-          active ? "border-sky-400" : "border-transparent"
-        }`}
-      >
-        {label}
-      </div>
-    </button>
-  );
-}
-
 function TimestampBadge({ ts }) {
   if (!ts) return null;
   return (
@@ -131,7 +126,7 @@ function Modal({ title, open, onClose, children }) {
   );
 }
 
-/* ---------- Mindmap ---------- */
+/* ---------- Mindmap (Restored) ---------- */
 
 function MindmapNode({ node, depth = 0 }) {
   if (!node) return null;
@@ -190,19 +185,15 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
+  // Restored: tab, flashOpen, quizOpen, chatHistory
   const [tab, setTab] = useState("summary");
   const [flashOpen, setFlashOpen] = useState(false);
   const [quizOpen, setQuizOpen] = useState(false);
   const [chatHistory, setChatHistory] = useState([]);
+  
   const [sourceTab, setSourceTab] = useState("youtube");
-  const [inputMode, setInputMode] = useState("youtube");
-  const [uploadName, setUploadName] = useState("");
   const chatRef = useRef();
-  const uploadRef = useRef();
 
-  useEffect(() => {
-    setInputMode(sourceTab);
-  }, [sourceTab]);
 
   // defensive helpers
   const safeArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
@@ -232,23 +223,20 @@ export default function App() {
   const terms = safeTerms(result?.terminologies);
   const flashcardCount = safeArray(result?.flashcards).length;
   const quizCount = safeArray(result?.quiz).length;
+
   const sourceNames = {
     youtube: "YouTube video",
-    video: "video file",
-    audio: "audio file",
-    pdf: "PDF/file",
     web: "webpage",
     text: "long text",
   };
+
   const hasMatchingResult = !!(
     result && (result.source || "youtube") === sourceTab
   );
 
+  // Simplified source definitions (no files)
   const sourceTabs = [
     { key: "youtube", label: "YouTube" },
-    { key: "video", label: "Video" },
-    { key: "audio", label: "Audio" },
-    { key: "pdf", label: "PDF / Files" },
     { key: "web", label: "Webpage" },
     { key: "text", label: "Long Text" },
   ];
@@ -261,32 +249,14 @@ export default function App() {
       sample: "https://www.youtube.com/watch?v=example",
     },
     {
-      key: "video",
-      title: "Video",
-      desc: "Link to MP4/MOV content.",
-      sample: "https://files.example.com/sample.mp4",
-    },
-    {
-      key: "audio",
-      title: "Audio",
-      desc: "Link to MP3/WAV for transcript + summary.",
-      sample: "https://files.example.com/sample.mp3",
-    },
-    {
-      key: "pdf",
-      title: "PDF / Files",
-      desc: "Attach PDF or images for summarizing.",
-      sample: "https://files.example.com/sample.pdf",
-    },
-    {
       key: "web",
-      title: "Webpage",
+      title: "Webpage / Article",
       desc: "Summarize any article URL.",
       sample: "https://example.com/article",
     },
     {
       key: "text",
-      title: "Long Text",
+      title: "Long Text / Notes",
       desc: "Paste raw text or notes below.",
       sample: "",
     },
@@ -294,16 +264,13 @@ export default function App() {
 
   const sourceLabels = {
     youtube: "YouTube Video",
-    video: "Video",
-    audio: "Audio",
-    pdf: "PDF / Files",
     web: "Webpage",
     text: "Long Text",
   };
 
-  const inputModes = [{ key: sourceTab, label: sourceLabels[sourceTab] || "Input" }];
   const linkInputClass =
     "w-full min-h-[140px] border-2 border-dashed border-slate-700 bg-[#0b1429] rounded-xl px-4 py-4 text-sm md:text-base text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60 resize-none";
+  
   /* ---------- API calls ---------- */
 
   async function analyze() {
@@ -318,19 +285,13 @@ export default function App() {
     } else if (sourceTab === "web") {
       if (!trimmed) return setError("Please paste the webpage URL to summarize.");
       payload.url = trimmed;
-    } else if (["video", "audio", "pdf"].includes(sourceTab)) {
-      if (!trimmed) {
-        const label = sourceLabels[sourceTab]?.toLowerCase() || sourceTab;
-        return setError(
-          `Please paste a link to the ${label} so we can process it (file uploads will be enabled later).`
-        );
-      }
-      payload.url = trimmed;
-    } else {
-      if (!trimmed) return setError("Please paste a link to summarize.");
+    } else if (sourceTab === "youtube") {
+      if (!trimmed) return setError("Please paste a YouTube link to summarize.");
       payload.url = trimmed;
       const maybeId = extractIdFromUrl(trimmed);
       if (maybeId) payload.video_id = maybeId;
+    } else {
+        return setError("Unsupported source mode.");
     }
 
     setLoading(true);
@@ -384,16 +345,18 @@ export default function App() {
     const q = chatRef.current?.value?.trim();
     if (!q || !result) return;
 
-    const history = [...chatHistory, { role: "user", content: q }];
+    const sourceInput = url.trim() || result?.source_input || "";
+
+    const history = [
+      ...chatHistory, 
+      { role: "user", content: q, source: result?.source ?? sourceTab } // Capture source for context in backend
+    ];
     setChatHistory(history);
     chatRef.current.value = "";
 
-    const sourceInput = url.trim() || result?.source_input || "";
     const chatPayload = {
       url: sourceInput,
-      source: result?.source ?? sourceTab,
       history,
-      video_id: result?.video_id || extractIdFromUrl(sourceInput),
     };
 
     try {
@@ -435,40 +398,6 @@ export default function App() {
     navigator.clipboard.writeText(result.overview);
   }
 
-  function handleUpload(e) {
-    const file = e.target.files?.[0];
-    setUploadName(file ? file.name : "");
-  }
-
-  function renderUploadSection(labelText) {
-    const friendly = sourceLabels[labelText] || labelText;
-    return (
-      <div className="space-y-2">
-        <label className="text-xs uppercase tracking-wide text-slate-400">
-          Upload file ({friendly})
-        </label>
-        <input type="file" ref={uploadRef} onChange={handleUpload} className="hidden" />
-        <div className="rounded-xl border-2 border-dashed border-slate-700 bg-[#0b1429] px-4 py-6 text-center text-sm text-slate-300 space-y-2">
-          <div>Drop or browse to upload ({friendly} mode)</div>
-          <div className="text-[11px] text-slate-500">
-            Upload UI is ready; paste a direct link above to process now while backend upload wiring is pending.
-          </div>
-          <div className="flex items-center justify-center gap-2">
-            <button
-              onClick={() => uploadRef.current?.click()}
-              className="px-3 py-2 rounded-lg bg-[#152441] text-sky-200 border border-slate-700 hover:border-slate-600 text-xs font-medium"
-            >
-              Select file
-            </button>
-            <span className="text-[11px] text-slate-400 truncate max-w-[180px]">
-              {uploadName ? `Selected: ${uploadName}` : "No file selected"}
-            </span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   function renderPreview() {
     const label = sourceNames[sourceTab] || "content";
     const placeholder = (
@@ -492,13 +421,14 @@ export default function App() {
     }
 
     if (sourceTab === "web") {
+      // For web/text, just show a preview of the source content
       return (
         <div className="h-full w-full bg-[#0b1429] p-4 text-left text-slate-100">
-          <p className="text-xs text-slate-400 mb-2">Webpage preview</p>
-          <div className="text-sm break-words">
-            {result?.source_url || result?.source_input || "Unknown URL"}
+          <p className="text-xs text-slate-400 mb-2">Webpage Preview</p>
+          <div className="text-sm break-words line-clamp-2 font-semibold">
+            {result?.title || "Unknown URL"}
           </div>
-          <p className="mt-2 text-xs text-slate-400 line-clamp-3">
+          <p className="mt-2 text-xs text-slate-400 line-clamp-5">
             {result?.overview || "Summary available in the panel on the right."}
           </p>
         </div>
@@ -506,13 +436,12 @@ export default function App() {
     }
 
     if (sourceTab === "text") {
-      const snippet =
-        result?.source_input || result?.overview || "Long text preview";
+      const snippet = result?.source_input || result?.overview || "Long text preview";
       return (
         <div className="h-full w-full bg-[#0b1429] p-4 text-left text-slate-100 overflow-y-auto">
-          <p className="text-xs text-slate-400 mb-2">Long text preview</p>
+          <p className="text-xs text-slate-400 mb-2">Text Input Snippet</p>
           <p className="text-sm leading-relaxed whitespace-pre-wrap">
-            {snippet.slice(0, 500)}
+            {snippet.slice(0, 500)}...
           </p>
         </div>
       );
@@ -524,6 +453,7 @@ export default function App() {
       </div>
     );
   }
+  
   /* ---------- UI ---------- */
 
   return (
@@ -531,15 +461,14 @@ export default function App() {
       <div className="px-4 sm:px-6 lg:px-10 py-8 max-w-7xl mx-auto">
         <div className="text-center max-w-5xl mx-auto">
           <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-            YouTube Video Summarizer
+            YouTube & Article Summarizer
           </h1>
           <p className="mt-3 text-lg text-slate-300">
-            Batch summarize YouTube videos and playlists in seconds, generating
-            comprehensive and in-depth summaries.
+            Generate comprehensive and in-depth summaries for videos and articles, complete with Mind Maps and Quizzes.
           </p>
         </div>
 
-        {/* top tabs + quick links */}
+        {/* top tabs */}
         <div className="mt-8">
           <div className="flex flex-wrap justify-center gap-2 max-w-5xl mx-auto bg-[#101a30] border border-slate-800 rounded-2xl p-2 shadow-[0_15px_40px_rgba(0,0,0,0.25)]">
             {sourceTabs.map((s) => (
@@ -552,7 +481,8 @@ export default function App() {
             ))}
           </div>
 
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Source Details */}
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
             {sourceDetails.map((item) => (
               <div
                 key={item.key}
@@ -589,18 +519,10 @@ export default function App() {
           </div>
 
           <div className="mt-5 max-w-5xl mx-auto bg-[#0f182d] border border-slate-800 rounded-2xl p-6 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
-            <div className="flex gap-6 text-sm font-medium border-b border-slate-800 mb-4">
-              {inputModes.map((m) => (
-                <ModeSwitch
-                  key={m.key}
-                  active={inputMode === m.key}
-                  label={m.label}
-                  onClick={() => setInputMode(m.key)}
-                />
-              ))}
-            </div>
-
+            
+            {/* Input Section */}
             <div className="space-y-4">
+              {/* YouTube Input */}
               {sourceTab === "youtube" && (
                 <>
                   <label className="text-xs uppercase tracking-wide text-slate-400 flex items-center justify-between">
@@ -622,6 +544,7 @@ export default function App() {
                 </>
               )}
 
+              {/* Web Input */}
               {sourceTab === "web" && (
                 <>
                   <label className="text-xs uppercase tracking-wide text-slate-400 flex items-center justify-between">
@@ -643,6 +566,7 @@ export default function App() {
                 </>
               )}
 
+              {/* Text Input */}
               {sourceTab === "text" && (
                 <>
                   <label className="text-xs uppercase tracking-wide text-slate-400">
@@ -655,39 +579,6 @@ export default function App() {
                     className="w-full min-h-[200px] border border-slate-800 bg-[#0b1429] rounded-xl px-4 py-4 text-sm md:text-base text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
                   />
                 </>
-              )}
-
-              {["video", "audio", "pdf"].includes(sourceTab) && (
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <label className="text-xs uppercase tracking-wide text-slate-400 flex items-center justify-between">
-                      <span>Paste link for {sourceLabels[sourceTab]}</span>
-                      <button
-                        onClick={() => setUrl("")}
-                        className="text-[11px] text-slate-300 hover:text-white"
-                      >
-                        Clear
-                      </button>
-                    </label>
-                    <textarea
-                      value={url}
-                      onChange={(e) => setUrl(e.target.value)}
-                      placeholder={
-                        sourceTab === "video"
-                          ? "Paste a direct link to an MP4/MOV file"
-                          : sourceTab === "audio"
-                          ? "Paste a direct link to an MP3/WAV file"
-                          : "Paste a direct link to a PDF or document"
-                      }
-                      className={linkInputClass}
-                    />
-                    <p className="text-[11px] text-slate-500">
-                      Paste a direct link to process immediately; the upload area below is ready for future file support.
-                    </p>
-                  </div>
-
-                  {renderUploadSection(sourceTab)}
-                </div>
               )}
             </div>
 
@@ -706,6 +597,7 @@ export default function App() {
             </button>
           </div>
         </div>
+        
         {/* results area */}
         <div className="mt-10 max-w-6xl mx-auto grid grid-cols-1 xl:grid-cols-3 gap-6">
           <div className="bg-[#0f182d] border border-slate-800 rounded-2xl p-4 shadow-lg">
@@ -780,12 +672,14 @@ export default function App() {
                     <button
                       onClick={() => setFlashOpen(true)}
                       className="px-2.5 py-1 rounded-full bg-[#2c7cf6] text-white hover:bg-[#1f6de4]"
+                      disabled={flashcardCount === 0}
                     >
                       Flashcards ({flashcardCount})
                     </button>
                     <button
                       onClick={() => setQuizOpen(true)}
                       className="px-2.5 py-1 rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
+                      disabled={quizCount === 0}
                     >
                       Quiz ({quizCount})
                     </button>
@@ -793,15 +687,17 @@ export default function App() {
                 </div>
 
                 <div className="mt-4 overflow-y-auto space-y-4 max-h-[26rem] pr-1">
+                  
                   {/* SUMMARY TAB */}
                   {tab === "summary" && (
                     <>
+                      {/* Summary Metadata */}
                       <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
                         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                           <div>
                             <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-wide text-slate-400 mb-1">
                               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                              <span>{result.type ?? "YouTube video"}</span>
+                              <span>{result.type ?? sourceLabels[result.source] ?? "Content"}</span>
                             </div>
                             <h2 className="text-base sm:text-lg font-semibold text-slate-50">
                               {result.title}
@@ -827,9 +723,10 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Core Message / Overview */}
                       <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
                         <div className="flex items-center justify-between gap-2">
-                          <h3 className="text-sm font-semibold">Summary</h3>
+                          <h3 className="text-sm font-semibold">Core Message (Summary)</h3>
                           <button
                             onClick={copySummary}
                             className="text-[11px] px-2.5 py-1 rounded-full bg-[#0d162b] text-slate-200 border border-slate-800 hover:bg-[#152441]"
@@ -837,7 +734,7 @@ export default function App() {
                             <IconCopy /> <span className="ml-1">Copy text</span>
                           </button>
                         </div>
-                        <p className="mt-2 text-sm leading-relaxed text-slate-100">
+                        <p className="mt-2 text-sm leading-relaxed text-slate-100 whitespace-pre-wrap">
                           {result.overview || "No overview provided."}
                         </p>
 
@@ -859,9 +756,10 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Detailed Topic Breakdown / Chapters */}
                       <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
                         <div className="flex items-center justify-between">
-                          <h3 className="text-sm font-semibold">Chapters</h3>
+                          <h3 className="text-sm font-semibold">Detailed Topic Breakdown</h3>
                           <span className="text-[11px] text-slate-400">
                             {chapters.length} items
                           </span>
@@ -887,7 +785,7 @@ export default function App() {
                                       <span className="font-medium text-slate-50">
                                         {title}
                                       </span>
-                                      <TimestampBadge ts={ts} />
+                                      {sourceTab === 'youtube' && <TimestampBadge ts={ts} />}
                                     </div>
                                     {c.summary && (
                                       <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
@@ -902,10 +800,11 @@ export default function App() {
                         )}
                       </div>
 
+                      {/* Key Takeaways / Major Points */}
                       <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
                         <div className="flex items-center justify-between">
                           <h3 className="text-sm font-semibold">
-                            Key moments
+                            Key Takeaways
                           </h3>
                           <span className="text-[11px] text-slate-400">
                             {majorPoints.length} items
@@ -914,7 +813,7 @@ export default function App() {
 
                         {majorPoints.length === 0 ? (
                           <p className="mt-2 text-sm text-slate-400 italic">
-                            No major points found.
+                            No key takeaways found.
                           </p>
                         ) : (
                           <ul className="mt-2 space-y-2">
@@ -933,7 +832,7 @@ export default function App() {
                                       <span className="font-medium text-slate-50">
                                         {title}
                                       </span>
-                                      <TimestampBadge ts={ts} />
+                                      {sourceTab === 'youtube' && <TimestampBadge ts={ts} />}
                                     </div>
                                     {p.summary && (
                                       <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
@@ -948,10 +847,11 @@ export default function App() {
                         )}
                       </div>
 
+                      {/* Key Terms & Concepts / Terminology */}
                       <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
                         <div className="flex items-center justify-between gap-2">
                           <h3 className="text-sm font-semibold">
-                            Terminology
+                            Key Terms & Concepts
                           </h3>
                           <span className="text-[11px] text-slate-400">
                             {terms.length} items
@@ -981,7 +881,7 @@ export default function App() {
                     </>
                   )}
 
-                  {/* MINDMAP TAB */}
+                  {/* MINDMAP TAB (Restored) */}
                   {tab === "mindmap" && (
                     <>
                       <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
@@ -999,14 +899,14 @@ export default function App() {
                           </div>
                           <p className="text-xs text-slate-400">
                             Clean outline of the main topics and subtopics
-                            extracted from the video.
+                            extracted from the content.
                           </p>
                         </div>
                       </div>
 
                       {normalizedMindmap.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-slate-800 bg-[#0d162b] p-4 text-sm text-slate-400 italic">
-                          No mindmap was generated for this video.
+                          No mindmap was generated for this content.
                         </div>
                       ) : (
                         <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
@@ -1020,13 +920,13 @@ export default function App() {
                     </>
                   )}
 
-                  {/* CHAT TAB */}
+                  {/* CHAT TAB (Restored) */}
                   {tab === "chat" && (
                     <div className="flex flex-col h-full">
                       <div className="flex-1 overflow-y-auto p-1.5 space-y-3">
                         {chatHistory.length === 0 ? (
                           <div className="text-sm text-slate-400 italic">
-                            Ask follow-up questions about this video here.
+                            Ask follow-up questions about this content here.
                           </div>
                         ) : (
                           chatHistory.map((m, i) => (
@@ -1053,7 +953,7 @@ export default function App() {
                       <div className="mt-3 flex gap-2">
                         <input
                           ref={chatRef}
-                          placeholder="Ask about the video..."
+                          placeholder="Ask about the content..."
                           className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-800 bg-[#0d162b] text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
                         />
                         <button
@@ -1075,7 +975,7 @@ export default function App() {
                   </p>
                   <p className="text-sm text-slate-400 mt-1">
                     Paste a link above and click Generate Summary to view the
-                    overview, mind map, chat, flashcards, and quiz here.
+                    full features here.
                   </p>
                 </div>
               </div>
@@ -1083,7 +983,8 @@ export default function App() {
           </div>
         </div>
       </div>
-      {/* Flashcards modal */}
+      
+      {/* Flashcards modal (Restored) */}
       <Modal
         title="Flashcards"
         open={flashOpen}
@@ -1108,7 +1009,7 @@ export default function App() {
         )}
       </Modal>
 
-      {/* Quiz modal */}
+      {/* Quiz modal (Restored) */}
       <Modal
         title="Quiz (MCQs)"
         open={quizOpen}
@@ -1144,18 +1045,4 @@ export default function App() {
       </Modal>
     </div>
   );
-}
-
-/* helper: extract id from YouTube url */
-function extractIdFromUrl(url) {
-  if (!url) return "";
-  try {
-    const m = url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
-    if (m) return m[1];
-    const m2 = url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
-    if (m2) return m2[1];
-    const m3 = url.match(/\/embed\/([A-Za-z0-9_-]{11})/);
-    if (m3) return m3[1];
-  } catch {}
-  return "";
 }
