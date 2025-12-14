@@ -16,3 +16,23 @@ __pycache__/
 node_modules/
 frontend/dist/
 dist/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# python
+.venv/
+venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
+
+# frontend build
+node_modules/
+frontend/dist/
+dist/
+
+# logs
+logs/
