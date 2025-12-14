@@ -2,6 +2,9 @@ import React, { useEffect, useState, useRef } from "react";
 
 const API_BASE = import.meta.env.VITE_API_BASE;
 
+const STORAGE_KEY = "ai_summarizer_state_v1";
+
+
 /* helper: extract id from YouTube url */
 function extractIdFromUrl(url) {
   if (!url) return "";
@@ -15,6 +18,29 @@ function extractIdFromUrl(url) {
   } catch {}
   return "";
 }
+
+function timestampToSeconds(ts) {
+  if (ts == null) return null;
+
+  if (typeof ts === "number") return ts;
+
+  if (typeof ts === "string") {
+    if (/^\d+$/.test(ts)) return Number(ts);
+
+    const parts = ts.split(":").map(Number);
+    if (parts.some(isNaN)) return null;
+
+    if (parts.length === 3) {
+      return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    }
+    if (parts.length === 2) {
+      return parts[0] * 60 + parts[1];
+    }
+  }
+
+  return null;
+}
+
 
 /* ---------- Icons ---------- */
 
@@ -80,6 +106,41 @@ function IconDownload() {
   );
 }
 
+function IconChevronLeft() {
+  return (
+    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+    </svg>
+  );
+}
+
+function IconChevronRight() {
+  return (
+    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+        <path strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function Logo({ onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex items-center gap-3 hover:opacity-90 transition"
+      title="New summary"
+    >
+      <img
+        src="/logo.png"
+        alt="AI Summarizer Logo"
+        className="h-10 w-10 rounded-lg"
+      />
+      <span className="text-xl sm:text-2xl font-bold tracking-tight text-slate-100">
+        AI Summarizer
+      </span>
+    </button>
+  );
+}
+
 /* ---------- Small UI helpers ---------- */
 
 function PillTab({ active, label, onClick }) {
@@ -98,35 +159,215 @@ function PillTab({ active, label, onClick }) {
   );
 }
 
-function TimestampBadge({ ts }) {
+function TimestampBadge({ ts, onClick }) {
   if (!ts) return null;
   return (
-    <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#101a30] text-slate-200 border border-slate-800">
+    <button
+      onClick={onClick}
+      className="text-[11px] px-2 py-0.5 rounded-full bg-[#101a30] text-slate-200 border border-slate-800 hover:bg-[#152441] hover:text-sky-300 transition"
+      title={`Seek to ${ts}`}
+    >
       {ts}
-    </span>
+    </button>
   );
 }
+
 function Modal({ title, open, onClose, children }) {
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-      <div className="bg-[#0f182d] text-slate-50 rounded-2xl shadow-2xl border border-slate-800 max-w-2xl w-full">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
-          <h3 className="font-semibold text-base">{title}</h3>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <div className="bg-[#0f182d] text-slate-50 rounded-2xl shadow-2xl border border-slate-800 max-w-2xl w-full flex flex-col max-h-[85vh]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800 shrink-0">
+          <h3 className="font-semibold text-lg">{title}</h3>
           <button
             onClick={onClose}
-            className="h-8 w-8 grid place-items-center rounded-full border border-slate-700 text-slate-300 hover:text-white"
+            className="h-8 w-8 grid place-items-center rounded-full border border-slate-700 text-slate-300 hover:text-white transition-colors"
           >
             X
           </button>
         </div>
-        <div className="p-5 max-h-[65vh] overflow-y-auto">{children}</div>
+        <div className="p-5 overflow-y-auto custom-scrollbar">
+            {children}
+        </div>
       </div>
     </div>
   );
 }
 
-/* ---------- Mindmap (Restored) ---------- */
+/* ---------- Interactive Components ---------- */
+
+function FlashcardCarousel({ cards }) {
+    const [index, setIndex] = useState(0);
+    const [flipped, setFlipped] = useState(false);
+
+    if (!cards || cards.length === 0) return <div className="text-slate-400 italic">No flashcards available.</div>;
+
+    const card = cards[index];
+
+    const handleNext = () => {
+        setFlipped(false);
+        setIndex((prev) => (prev + 1) % cards.length);
+    };
+
+    const handlePrev = () => {
+        setFlipped(false);
+        setIndex((prev) => (prev - 1 + cards.length) % cards.length);
+    };
+
+    return (
+        <div className="flex flex-col items-center w-full max-w-lg mx-auto">
+            {/* Card Container */}
+            <div 
+                className="w-full h-72 cursor-pointer perspective-1000 group"
+                style={{ perspective: "1000px" }}
+                onClick={() => setFlipped(!flipped)}
+            >
+                <div 
+                    className="relative w-full h-full transition-transform duration-500 shadow-xl rounded-2xl"
+                    style={{ 
+                        transformStyle: "preserve-3d", 
+                        transform: flipped ? "rotateY(180deg)" : "rotateY(0deg)" 
+                    }}
+                >
+                    {/* Front */}
+                    <div 
+                        className="absolute inset-0 w-full h-full bg-[#152441] border border-slate-700 rounded-2xl p-8 flex flex-col items-center justify-center text-center backface-hidden"
+                        style={{ backfaceVisibility: "hidden" }}
+                    >
+                        <span className="text-xs font-bold uppercase tracking-wider text-sky-400 mb-4">Question</span>
+                        <p className="text-lg md:text-xl font-medium text-slate-100 leading-relaxed">
+                            {card.q ?? card.question}
+                        </p>
+                        <p className="absolute bottom-4 text-[10px] uppercase tracking-widest text-slate-500 opacity-70">Click to flip</p>
+                    </div>
+
+                    {/* Back */}
+                    <div 
+                        className="absolute inset-0 w-full h-full bg-[#0d162b] border border-sky-900 rounded-2xl p-8 flex flex-col items-center justify-center text-center backface-hidden"
+                        style={{ 
+                            backfaceVisibility: "hidden", 
+                            transform: "rotateY(180deg)" 
+                        }}
+                    >
+                        <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 mb-4">Answer</span>
+                        <p className="text-base md:text-lg text-slate-200 leading-relaxed">
+                            {card.a ?? card.answer}
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Controls */}
+            <div className="flex items-center justify-between w-full mt-6 px-4">
+                <button 
+                    onClick={handlePrev} 
+                    className="p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                >
+                    <IconChevronLeft />
+                </button>
+                <span className="text-sm font-medium text-slate-400 font-mono">
+                    {index + 1} / {cards.length}
+                </span>
+                <button 
+                    onClick={handleNext}
+                    className="p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+                >
+                    <IconChevronRight />
+                </button>
+            </div>
+        </div>
+    );
+}
+
+function QuizInteractive({ questions }) {
+    const [selections, setSelections] = useState({});
+
+    if (!questions || questions.length === 0) return <div className="text-slate-400 italic">No quiz available.</div>;
+
+    const handleSelect = (qIndex, choice) => {
+        // Prevent changing answer
+        if (selections[qIndex]) return; 
+        setSelections(prev => ({...prev, [qIndex]: choice}));
+    };
+
+    return (
+        <div className="space-y-8">
+            {questions.map((q, i) => {
+                const userChoice = selections[i];
+                const isAnswered = !!userChoice;
+                const correctAnswer = q.answer;
+                const isCorrect = userChoice === correctAnswer;
+
+                return (
+                    <div key={i} className="p-5 border border-slate-800 rounded-xl bg-[#101a30]">
+                        <div className="flex gap-3 mb-4">
+                            <span className="flex-none flex items-center justify-center w-6 h-6 rounded-full bg-slate-800 text-xs font-bold text-slate-400 border border-slate-700">
+                                {i + 1}
+                            </span>
+                            <p className="font-medium text-slate-100 pt-0.5">{q.q ?? q.question}</p>
+                        </div>
+                        
+                        <div className="space-y-2.5 pl-9">
+                            {(q.choices || []).map((c, cIdx) => {
+                                let btnClass = "w-full text-left px-4 py-3 rounded-lg border text-sm transition-all duration-200 flex items-center justify-between group ";
+                                
+                                if (!isAnswered) {
+                                    btnClass += "border-slate-700 bg-[#0d162b] hover:bg-[#152441] hover:border-slate-600 text-slate-300";
+                                } else {
+                                    if (c === correctAnswer) {
+                                        // Always highlight correct answer
+                                        btnClass += "bg-emerald-500/10 border-emerald-500/50 text-emerald-200 font-medium shadow-[0_0_15px_rgba(16,185,129,0.1)]";
+                                    } else if (c === userChoice) {
+                                        // Highlight wrong user selection
+                                        btnClass += "bg-red-500/10 border-red-500/50 text-red-200";
+                                    } else {
+                                        // Dim others
+                                        btnClass += "border-slate-800 bg-[#0d162b] text-slate-500 opacity-50";
+                                    }
+                                }
+
+                                return (
+                                    <button 
+                                        key={cIdx}
+                                        onClick={() => handleSelect(i, c)}
+                                        disabled={isAnswered}
+                                        className={btnClass}
+                                    >
+                                        <span>{c}</span>
+                                        {isAnswered && c === correctAnswer && (
+                                            <span className="text-emerald-400 text-xs font-bold uppercase ml-2">Correct</span>
+                                        )}
+                                        {isAnswered && c === userChoice && c !== correctAnswer && (
+                                            <span className="text-red-400 text-xs font-bold uppercase ml-2">Your Answer</span>
+                                        )}
+                                    </button>
+                                )
+                            })}
+                        </div>
+
+                        {isAnswered && (
+                            <div className={`mt-4 ml-9 text-xs px-4 py-3 rounded-lg border flex items-start gap-2 animate-in fade-in duration-300 ${isCorrect ? 'bg-emerald-900/10 border-emerald-900/30 text-emerald-200' : 'bg-red-900/10 border-red-900/30 text-red-200'}`}>
+                                <div className="mt-0.5 font-bold text-lg">
+                                    {isCorrect ? '✓' : '✕'}
+                                </div>
+                                <div>
+                                    <span className="font-bold uppercase tracking-wide opacity-80 block mb-1">
+                                        {isCorrect ? "Correct!" : "Incorrect"}
+                                    </span>
+                                    {!isCorrect && (
+                                        <span>The correct answer is: <span className="font-semibold">{correctAnswer}</span></span>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                )
+            })}
+        </div>
+    );
+}
+
+/* ---------- Mindmap ---------- */
 
 function MindmapNode({ node, depth = 0 }) {
   if (!node) return null;
@@ -179,6 +420,31 @@ function MindmapNode({ node, depth = 0 }) {
 }
 /* ---------- Main App ---------- */
 
+
+
+
+
+let ytApiPromise = null;
+
+function loadYouTubeAPI() {
+  if (ytApiPromise) return ytApiPromise;
+
+  ytApiPromise = new Promise((resolve) => {
+    if (window.YT && window.YT.Player) {
+      resolve(window.YT);
+      return;
+    }
+
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.body.appendChild(tag);
+
+    window.onYouTubeIframeAPIReady = () => resolve(window.YT);
+  });
+
+  return ytApiPromise;
+}
+
 export default function App() {
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -193,6 +459,104 @@ export default function App() {
   
   const [sourceTab, setSourceTab] = useState("youtube");
   const chatRef = useRef();
+
+  const playerRef = useRef(null);
+  const iframeRef = useRef(null);
+
+  const chatEndRef = useRef(null);
+  const [isTyping, setIsTyping] = useState(false);
+
+
+  function seekToTimestamp(ts) {
+    const seconds = timestampToSeconds(ts);
+
+    if (
+      seconds == null ||
+      !playerRef.current ||
+      typeof playerRef.current.seekTo !== "function"
+    ) {
+      console.warn("Seek failed:", ts);
+      return;
+    }
+
+    playerRef.current.seekTo(seconds, true);
+    playerRef.current.playVideo();
+  }
+
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistory, isTyping]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+
+      const saved = JSON.parse(raw);
+
+      if (saved.sourceTab) setSourceTab(saved.sourceTab);
+      if (saved.url) setUrl(saved.url);
+      if (saved.result) setResult(saved.result);
+      if (saved.tab) setTab(saved.tab);
+      if (saved.chatHistory) setChatHistory(saved.chatHistory);
+    } catch (e) {
+      console.warn("Failed to restore saved state", e);
+    }
+  }, []);
+
+
+  useEffect(() => {
+    // Avoid saving empty state
+    if (!url && !result) return;
+
+    const payload = {
+      sourceTab,
+      url,
+      result,
+      tab,
+      chatHistory,
+    };
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+  }, [sourceTab, url, result, tab, chatHistory]);
+
+
+    useEffect(() => {
+      if (sourceTab !== "youtube") return;
+      if (!result?.video_id) return;
+      if (!iframeRef.current) return;
+
+      let destroyed = false;
+
+      loadYouTubeAPI().then((YT) => {
+        if (destroyed) return;
+
+        // Destroy old player if exists
+        if (playerRef.current) {
+          playerRef.current.destroy();
+          playerRef.current = null;
+        }
+
+        playerRef.current = new YT.Player(iframeRef.current, {
+          videoId: result.video_id,
+          playerVars: {
+            modestbranding: 1,
+            rel: 0,
+          },
+          events: {
+            onReady: () => {
+              console.log("YT player ready");
+            },
+          },
+        });
+      });
+
+      return () => {
+        destroyed = true;
+      };
+    }, [sourceTab, result?.video_id]);
+
 
 
   // defensive helpers
@@ -347,25 +711,22 @@ export default function App() {
 
     const sourceInput = url.trim() || result?.source_input || "";
 
-    const history = [
-      ...chatHistory, 
-      { role: "user", content: q, source: result?.source ?? sourceTab } // Capture source for context in backend
-    ];
-    setChatHistory(history);
+    setChatHistory((h) => [...h, { role: "user", content: q }]);
     chatRef.current.value = "";
-
-    const chatPayload = {
-      url: sourceInput,
-      history,
-    };
+    setIsTyping(true);
 
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(chatPayload),
+        body: JSON.stringify({
+          url: sourceInput,
+          history: [...chatHistory, { role: "user", content: q }],
+        }),
       });
+
       const json = await res.json();
+
       setChatHistory((h) => [
         ...h,
         { role: "assistant", content: json.answer },
@@ -375,10 +736,48 @@ export default function App() {
         ...h,
         { role: "assistant", content: "(error contacting server)" },
       ]);
+    } finally {
+      setIsTyping(false);
     }
   }
 
+
   /* ---------- Small actions ---------- */
+
+  function clearPreview() {
+    // Destroy YouTube player if exists
+    if (playerRef.current) {
+      try {
+        playerRef.current.destroy();
+      } catch {}
+      playerRef.current = null;
+    }
+
+    // Remove iframe contents
+    if (iframeRef.current) {
+      iframeRef.current.innerHTML = "";
+    }
+  }
+
+
+  function resetSummarizer() {
+    clearPreview();
+    setUrl("");
+    setResult(null);
+    setError(null);
+    setChatHistory([]);
+    setTab("summary");
+    localStorage.removeItem(STORAGE_KEY);
+  }
+
+  function goBack() {
+    setChatHistory([]);
+    clearPreview();
+    setResult(null);
+    setError(null);
+    setTab("summary");
+  }
+
 
   function downloadJSON() {
     if (!result) return;
@@ -411,12 +810,12 @@ export default function App() {
     if (sourceTab === "youtube") {
       if (!result?.video_id) return placeholder;
       return (
-        <iframe
-          title={result.title || "video"}
-          src={`https://www.youtube.com/embed/${result.video_id}`}
-          className="w-full h-full"
-          allowFullScreen
-        />
+          <div
+            ref={iframeRef}
+            className="w-full h-full"
+            id="yt-player"
+          />
+
       );
     }
 
@@ -459,14 +858,32 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0b1429] text-slate-100">
       <div className="px-4 sm:px-6 lg:px-10 py-8 max-w-7xl mx-auto">
-        <div className="text-center max-w-5xl mx-auto">
-          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
-            YouTube & Article Summarizer
-          </h1>
-          <p className="mt-3 text-lg text-slate-300">
-            Generate comprehensive and in-depth summaries for videos and articles, complete with Mind Maps and Quizzes.
-          </p>
+        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center sm:items-end justify-between gap-6">
+          
+            <div className="flex items-center gap-3">
+              {result && (
+                <button
+                  onClick={goBack}
+                  className="h-9 w-9 rounded-lg border border-slate-700 bg-[#0d162b] hover:bg-[#152441] text-slate-300 hover:text-white transition"
+                  title="Back"
+                >
+                  ←
+                </button>
+              )}
+
+              <Logo onClick={resetSummarizer} />
+            </div>
+
+          <div className="text-center sm:text-right">
+            <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
+              AI Summarizer
+            </h1>
+            <p className="mt-2 text-base text-slate-300 max-w-xl">
+              Generate comprehensive and in-depth summaries for videos and articles, complete with Mind Maps and Quizzes.
+            </p>
+          </div>
         </div>
+
 
         {/* top tabs */}
         <div className="mt-8">
@@ -785,7 +1202,11 @@ export default function App() {
                                       <span className="font-medium text-slate-50">
                                         {title}
                                       </span>
-                                      {sourceTab === 'youtube' && <TimestampBadge ts={ts} />}
+                                      {sourceTab === 'youtube' && <TimestampBadge
+  ts={ts}
+  onClick={() => seekToTimestamp(ts)}
+/>
+}
                                     </div>
                                     {c.summary && (
                                       <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
@@ -832,7 +1253,10 @@ export default function App() {
                                       <span className="font-medium text-slate-50">
                                         {title}
                                       </span>
-                                      {sourceTab === 'youtube' && <TimestampBadge ts={ts} />}
+                                      {sourceTab === 'youtube' && <TimestampBadge
+  ts={ts}
+  onClick={() => seekToTimestamp(ts)}
+/>}
                                     </div>
                                     {p.summary && (
                                       <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
@@ -923,48 +1347,109 @@ export default function App() {
                   {/* CHAT TAB (Restored) */}
                   {tab === "chat" && (
                     <div className="flex flex-col h-full">
-                      <div className="flex-1 overflow-y-auto p-1.5 space-y-3">
-                        {chatHistory.length === 0 ? (
-                          <div className="text-sm text-slate-400 italic">
-                            Ask follow-up questions about this content here.
+                      {/* Messages */}
+                      <div className="flex-1 overflow-y-auto px-2 py-3 space-y-4">
+                        {chatHistory.length === 0 && !isTyping ? (
+                          <div className="text-sm text-slate-400 italic text-center mt-8">
+                            Ask follow-up questions about this content.
                           </div>
                         ) : (
                           chatHistory.map((m, i) => (
                             <div
                               key={i}
-                              className={`max-w-[85%] ${
-                                m.role === "user" ? "ml-auto text-right" : ""
+                              className={`flex gap-3 ${
+                                m.role === "user" ? "justify-end" : "justify-start"
                               }`}
                             >
+                              {/* Avatar */}
+                              {m.role === "assistant" && (
+                                <div className="h-8 w-8 rounded-full bg-sky-600/20 text-sky-400 grid place-items-center text-sm font-bold">
+                                  AI
+                                </div>
+                              )}
+
+                              {/* Bubble */}
                               <div
-                                className={`inline-block px-3 py-2 rounded-lg text-sm ${
+                                className={`max-w-[75%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
                                   m.role === "user"
-                                    ? "bg-[#2c7cf6] text-white"
-                                    : "bg-[#101a30] text-slate-50 border border-slate-800"
+                                    ? "bg-[#2c7cf6] text-white rounded-br-md"
+                                    : "bg-[#101a30] text-slate-100 border border-slate-800 rounded-bl-md"
                                 }`}
                               >
                                 {m.content}
                               </div>
+
+                              {m.role === "user" && (
+                                <div className="h-8 w-8 rounded-full bg-slate-700 text-slate-200 grid place-items-center text-xs font-bold">
+                                  You
+                                </div>
+                              )}
                             </div>
                           ))
                         )}
+
+                        {/* Typing indicator */}
+                        {isTyping && (
+                          <div className="flex gap-3 items-center">
+                            <div className="h-8 w-8 rounded-full bg-sky-600/20 text-sky-400 grid place-items-center text-sm font-bold">
+                              AI
+                            </div>
+                            <div className="px-4 py-2 rounded-2xl bg-[#101a30] border border-slate-800 text-slate-400 text-sm italic">
+                              AI is typing…
+                            </div>
+                          </div>
+                        )}
+
+                        <div ref={chatEndRef} />
                       </div>
 
-                      <div className="mt-3 flex gap-2">
-                        <input
+                      {/* Input */}
+                      <div className="mt-3 flex gap-2 border-t border-slate-800 pt-3">
+                        <textarea
                           ref={chatRef}
-                          placeholder="Ask about the content..."
-                          className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-800 bg-[#0d162b] text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
+                          placeholder="Ask about the content…"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.shiftKey) {
+                              e.preventDefault();
+                              sendChat();
+                            }
+                          }}
+                          className="
+                            flex-1
+                            h-12
+                            max-h-32
+                            overflow-y-auto
+                            resize-none
+                            px-4
+                            py-3
+                            text-sm
+                            rounded-xl
+                            border
+                            border-slate-800
+                            bg-[#0d162b]
+                            text-slate-100
+                            placeholder:text-slate-500
+                            focus:outline-none
+                            focus:ring-2
+                            focus:ring-sky-500/60
+                            scrollbar-thin
+                            scrollbar-thumb-slate-700
+                            scrollbar-track-transparent
+                          "
                         />
+
+
                         <button
                           onClick={sendChat}
-                          className="px-4 py-2 rounded-lg bg-[#2c7cf6] text-white text-sm hover:bg-[#1f6de4]"
+                          disabled={isTyping}
+                          className="px-4 py-2 rounded-xl bg-[#2c7cf6] text-white text-sm font-medium hover:bg-[#1f6de4] disabled:opacity-50"
                         >
                           Send
                         </button>
                       </div>
                     </div>
                   )}
+
                 </div>
               </>
             ) : (
@@ -984,64 +1469,22 @@ export default function App() {
         </div>
       </div>
       
-      {/* Flashcards modal (Restored) */}
+      {/* Flashcards modal (Interactive) */}
       <Modal
         title="Flashcards"
         open={flashOpen}
         onClose={() => setFlashOpen(false)}
       >
-        {safeArray(result?.flashcards).length === 0 ? (
-          <div className="text-sm text-slate-300 italic">No flashcards provided.</div>
-        ) : (
-          safeArray(result.flashcards).map((f, i) => (
-            <div
-              key={i}
-              className="py-2 border-b border-slate-800 last:border-none"
-            >
-              <div className="font-semibold text-sm">
-                {f.q ?? f.question ?? `Q${i + 1}`}
-              </div>
-              <div className="text-sm text-slate-200 mt-1">
-                {f.a ?? f.answer ?? ""}
-              </div>
-            </div>
-          ))
-        )}
+        <FlashcardCarousel cards={safeArray(result?.flashcards)} />
       </Modal>
 
-      {/* Quiz modal (Restored) */}
+      {/* Quiz modal (Interactive) */}
       <Modal
         title="Quiz (MCQs)"
         open={quizOpen}
         onClose={() => setQuizOpen(false)}
       >
-        {safeArray(result?.quiz).length === 0 ? (
-          <div className="text-sm text-slate-300 italic">No quiz provided.</div>
-        ) : (
-          safeArray(result.quiz).map((q, i) => (
-            <div
-              key={i}
-              className="py-2 border-b border-slate-800 last:border-none"
-            >
-              <div className="font-semibold text-sm">
-                {q.q ?? q.question ?? `Question ${i + 1}`}
-              </div>
-              <ul className="mt-2 text-sm list-disc ml-5 space-y-1">
-                {safeArray(q.choices).map((c, j) => (
-                  <li
-                    key={j}
-                    className={c === q.answer ? "font-medium" : ""}
-                  >
-                    {c}
-                  </li>
-                ))}
-              </ul>
-              <div className="text-xs text-slate-400 mt-2">
-                Answer: {q.answer}
-              </div>
-            </div>
-          ))
-        )}
+        <QuizInteractive questions={safeArray(result?.quiz)} />
       </Modal>
     </div>
   );
