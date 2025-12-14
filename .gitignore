@@ -4,3 +4,15 @@ frontend/dist/config.json
 
 # secrets
 .env
+
+# python
+.venv/
+venv/
+backend/.venv/
+__pycache__/
+*.py[cod]
+
+# frontend build
+node_modules/
+frontend/dist/
+dist/
