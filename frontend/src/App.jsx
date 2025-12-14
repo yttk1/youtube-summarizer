@@ -1,108 +1,183 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
+
 const API_BASE = import.meta.env.VITE_API_BASE;
 
-/*
-  Polished YouTube Summarizer App.jsx
-  - Two-column responsive layout
-  - Right panel hidden until analyze result
-  - Accordion major points, timestamp badges
-  - Flashcards & Quiz modal
-  - Copy / Download JSON, Copy timestamp link
-  - Defensive rendering (won't crash if model returns odd shapes)
-  - Requires Tailwind CSS
-*/
+/* helper: extract id from YouTube url */
+function extractIdFromUrl(url) {
+  if (!url) return "";
+  try {
+    const m = url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
+    if (m) return m[1];
+    const m2 = url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
+    if (m2) return m2[1];
+    const m3 = url.match(/\/embed\/([A-Za-z0-9_-]{11})/);
+    if (m3) return m3[1];
+  } catch {}
+  return "";
+}
+
+/* ---------- Icons ---------- */
 
 function IconCopy() {
   return (
-    <svg className="w-4 h-4 inline-block" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <path strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M9 12H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v4" />
-      <rect x="9" y="9" width="11" height="11" rx="2" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      className="w-4 h-4 inline-block"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+    >
+      <path
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M9 12H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v4"
+      />
+      <rect
+        x="9"
+        y="9"
+        width="11"
+        height="11"
+        rx="2"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
 
 function IconDownload() {
   return (
-    <svg className="w-4 h-4 inline-block" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-      <path strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M12 3v12" />
-      <path strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" d="M8 11l4 4 4-4" />
-      <rect x="3" y="17" width="18" height="4" rx="1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    <svg
+      className="w-4 h-4 inline-block"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+    >
+      <path
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M12 3v12"
+      />
+      <path
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M8 11l4 4 4-4"
+      />
+      <rect
+        x="3"
+        y="17"
+        width="18"
+        height="4"
+        rx="1"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
     </svg>
+  );
+}
+
+/* ---------- Small UI helpers ---------- */
+
+function PillTab({ active, label, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium transition border ${
+        active
+          ? "bg-[#152441] border-slate-700 text-sky-300 shadow-[0_10px_30px_rgba(0,0,0,0.35)]"
+          : "bg-[#0d162b] border-slate-800 text-slate-300 hover:border-slate-700 hover:text-white"
+      }`}
+    >
+      <span className="h-2 w-2 rounded-full bg-sky-400 inline-block" />
+      <span>{label}</span>
+    </button>
   );
 }
 
 function TimestampBadge({ ts }) {
   if (!ts) return null;
-  return <span className="text-xs px-2 py-0.5 mr-2 mb-2 rounded bg-slate-100 text-slate-700">{ts}</span>;
+  return (
+    <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#101a30] text-slate-200 border border-slate-800">
+      {ts}
+    </span>
+  );
+}
+function Modal({ title, open, onClose, children }) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="bg-[#0f182d] text-slate-50 rounded-2xl shadow-2xl border border-slate-800 max-w-2xl w-full">
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
+          <h3 className="font-semibold text-base">{title}</h3>
+          <button
+            onClick={onClose}
+            className="h-8 w-8 grid place-items-center rounded-full border border-slate-700 text-slate-300 hover:text-white"
+          >
+            X
+          </button>
+        </div>
+        <div className="p-5 max-h-[65vh] overflow-y-auto">{children}</div>
+      </div>
+    </div>
+  );
 }
 
-function AccordionPoint({ p, index }) {
-  const [open, setOpen] = useState(index === 0);
-  const title = p.title ?? p.summary ?? "Untitled";
-  const ts = p.timestamp ?? p.start ?? "";
-  return (
-    <div className="border-b last:border-none py-3">
-      <button
-        onClick={() => setOpen((s) => !s)}
-        className="w-full flex items-start justify-between gap-4"
-        aria-expanded={open}
-      >
-        <div>
-          <div className="flex items-center gap-2">
-            <TimestampBadge ts={ts} />
-            <h4 className="text-sm font-semibold text-slate-800">{title}</h4>
-          </div>
-          {!open && <p className="text-xs text-slate-600 mt-1 line-clamp-2">{p.summary ?? ""}</p>}
-        </div>
-        <div className="text-slate-400">{open ? "▾" : "▸"}</div>
-      </button>
+/* ---------- Mindmap (Restored) ---------- */
 
-      {open && (
-        <div className="mt-3 text-sm text-slate-700">
-          <p className="mb-2">{p.summary ?? "No summary available."}</p>
-          {p.details && <div className="text-xs text-slate-600">{p.details}</div>}
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={() => navigator.clipboard.writeText(p.summary ?? "")}
-              className="text-xs px-2 py-1 rounded bg-slate-100"
-            >
-              <IconCopy /> <span className="ml-1">Copy</span>
-            </button>
-            {ts && (
-              <button
-                onClick={() => {
-                  const id = extractIdFromUrl(window.location.href) || "";
-                  const link = id ? `https://youtu.be/${id}?t=${Math.round(Number(ts))}` : `#${ts}`;
-                  navigator.clipboard.writeText(link);
-                  alert("Timestamp link copied");
-                }}
-                className="text-xs px-2 py-1 rounded bg-slate-100"
-              >
-                Copy timestamp link
-              </button>
+function MindmapNode({ node, depth = 0 }) {
+  if (!node) return null;
+
+  const label = node.title || node.topic || node.name || node.heading || "Untitled";
+  const children = Array.isArray(node.children)
+    ? node.children
+    : Array.isArray(node.subtopics)
+    ? node.subtopics
+    : Array.isArray(node.items)
+    ? node.items
+    : [];
+
+  return (
+    <div className="pl-4">
+      <div className="relative">
+        {depth > 0 && (
+          <span className="absolute -left-4 top-0 bottom-0 w-px bg-slate-800" />
+        )}
+
+        <div className="ml-2 mb-3 rounded-xl bg-[#101a30] border border-slate-800 p-3 shadow-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div className="text-sm font-semibold text-slate-50">{label}</div>
+            {children.length > 0 && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-[#0d162b] text-slate-300 border border-slate-800">
+                {children.length} sub
+              </span>
             )}
           </div>
+          {node.summary && (
+            <p className="mt-1 text-xs text-slate-300 leading-relaxed">
+              {node.summary}
+            </p>
+          )}
+          {node.notes && (
+            <p className="mt-1 text-[11px] text-slate-400">{node.notes}</p>
+          )}
+        </div>
+      </div>
+
+      {children.length > 0 && (
+        <div className="ml-4">
+          {children.map((child, i) => (
+            <MindmapNode key={i} node={child} depth={depth + 1} />
+          ))}
         </div>
       )}
     </div>
   );
 }
-
-// Modals: flashcards & quiz
-function Modal({ title, open, onClose, children }) {
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="bg-white rounded-xl shadow-lg max-w-2xl w-full p-4">
-        <div className="flex items-center justify-between">
-          <h3 className="font-semibold text-lg">{title}</h3>
-          <button onClick={onClose} className="text-slate-500">✕</button>
-        </div>
-        <div className="mt-3 max-h-[60vh] overflow-y-auto">{children}</div>
-      </div>
-    </div>
-  );
-}
+/* ---------- Main App ---------- */
 
 export default function App() {
   const [url, setUrl] = useState("");
@@ -110,11 +185,15 @@ export default function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
+  // Restored: tab, flashOpen, quizOpen, chatHistory
   const [tab, setTab] = useState("summary");
   const [flashOpen, setFlashOpen] = useState(false);
   const [quizOpen, setQuizOpen] = useState(false);
   const [chatHistory, setChatHistory] = useState([]);
+  
+  const [sourceTab, setSourceTab] = useState("youtube");
   const chatRef = useRef();
+
 
   // defensive helpers
   const safeArray = (v) => (Array.isArray(v) ? v : v ? [v] : []);
@@ -124,40 +203,139 @@ export default function App() {
     if (typeof v === "object") return [v];
     return [{ term: "", definition: String(v) }];
   };
+  const safePoints = (v) => {
+    if (!v) return [];
+    if (Array.isArray(v)) return v;
+    return [v];
+  };
+
+  const normalizedMindmap = (() => {
+    const mapData = result?.mindmap;
+    if (!mapData) return [];
+    if (Array.isArray(mapData)) return mapData;
+    if (typeof mapData === "object") return [mapData];
+    return [];
+  })();
+
+  const majorPoints = safePoints(result?.major_points);
+  const chapters = safePoints(result?.chapters);
+  const tags = safeArray(result?.tags);
+  const terms = safeTerms(result?.terminologies);
+  const flashcardCount = safeArray(result?.flashcards).length;
+  const quizCount = safeArray(result?.quiz).length;
+
+  const sourceNames = {
+    youtube: "YouTube video",
+    web: "webpage",
+    text: "long text",
+  };
+
+  const hasMatchingResult = !!(
+    result && (result.source || "youtube") === sourceTab
+  );
+
+  // Simplified source definitions (no files)
+  const sourceTabs = [
+    { key: "youtube", label: "YouTube" },
+    { key: "web", label: "Webpage" },
+    { key: "text", label: "Long Text" },
+  ];
+
+  const sourceDetails = [
+    {
+      key: "youtube",
+      title: "YouTube Video",
+      desc: "Paste a video link to summarize.",
+      sample: "https://www.youtube.com/watch?v=example",
+    },
+    {
+      key: "web",
+      title: "Webpage / Article",
+      desc: "Summarize any article URL.",
+      sample: "https://example.com/article",
+    },
+    {
+      key: "text",
+      title: "Long Text / Notes",
+      desc: "Paste raw text or notes below.",
+      sample: "",
+    },
+  ];
+
+  const sourceLabels = {
+    youtube: "YouTube Video",
+    web: "Webpage",
+    text: "Long Text",
+  };
+
+  const linkInputClass =
+    "w-full min-h-[140px] border-2 border-dashed border-slate-700 bg-[#0b1429] rounded-xl px-4 py-4 text-sm md:text-base text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60 resize-none";
+  
+  /* ---------- API calls ---------- */
 
   async function analyze() {
     setError(null);
-    setResult(null);
-    if (!url) return setError("Please paste a YouTube URL.");
+
+    const trimmed = url.trim();
+    const payload = { source: sourceTab };
+
+    if (sourceTab === "text") {
+      if (!trimmed) return setError("Please paste your long text to summarize.");
+      payload.text = trimmed;
+    } else if (sourceTab === "web") {
+      if (!trimmed) return setError("Please paste the webpage URL to summarize.");
+      payload.url = trimmed;
+    } else if (sourceTab === "youtube") {
+      if (!trimmed) return setError("Please paste a YouTube link to summarize.");
+      payload.url = trimmed;
+      const maybeId = extractIdFromUrl(trimmed);
+      if (maybeId) payload.video_id = maybeId;
+    } else {
+        return setError("Unsupported source mode.");
+    }
+
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify(payload),
       });
+
       const text = await res.text();
       if (!res.ok) {
         try {
           const parsed = JSON.parse(text);
           throw new Error(parsed.detail ?? parsed.error ?? text);
-        } catch (e) {
+        } catch {
           throw new Error(text || "Server error");
         }
       }
+
       const json = JSON.parse(text);
-      // ensure video_id present
-      if (!json.video_id) {
-        try {
-          const id = extractIdFromUrl(url);
-          if (id) json.video_id = id;
-        } catch {}
+      const merged = {
+        ...json,
+        source: sourceTab,
+        source_input: payload.text ?? payload.url ?? trimmed,
+      };
+
+      if (sourceTab === "youtube" && !merged.video_id) {
+        const id = extractIdFromUrl(trimmed);
+        if (id) merged.video_id = id;
       }
-      setResult(json);
+
+      setResult(merged);
       setTab("summary");
     } catch (e) {
       console.error(e);
-      setError(String(e.message ?? e));
+      const msg = String(e.message ?? e);
+      if (msg.toLowerCase().includes("notranscriptfound")) {
+        setError(
+          "Không tìm thấy transcript cho video này. Hãy kiểm tra link công khai, có phụ đề/tự động caption, hoặc thử một video khác."
+        );
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -166,289 +344,705 @@ export default function App() {
   async function sendChat() {
     const q = chatRef.current?.value?.trim();
     if (!q || !result) return;
-    const history = [...chatHistory, { role: "user", content: q }];
+
+    const sourceInput = url.trim() || result?.source_input || "";
+
+    const history = [
+      ...chatHistory, 
+      { role: "user", content: q, source: result?.source ?? sourceTab } // Capture source for context in backend
+    ];
     setChatHistory(history);
     chatRef.current.value = "";
+
+    const chatPayload = {
+      url: sourceInput,
+      history,
+    };
+
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, history }),
+        body: JSON.stringify(chatPayload),
       });
       const json = await res.json();
-      setChatHistory((h) => [...h, { role: "assistant", content: json.answer }]);
-    } catch (e) {
-      setChatHistory((h) => [...h, { role: "assistant", content: "(error contacting server)" }]);
+      setChatHistory((h) => [
+        ...h,
+        { role: "assistant", content: json.answer },
+      ]);
+    } catch {
+      setChatHistory((h) => [
+        ...h,
+        { role: "assistant", content: "(error contacting server)" },
+      ]);
     }
   }
 
+  /* ---------- Small actions ---------- */
+
   function downloadJSON() {
-    const blob = new Blob([JSON.stringify(result, null, 2)], { type: "application/json" });
+    if (!result) return;
+    const blob = new Blob([JSON.stringify(result, null, 2)], {
+      type: "application/json",
+    });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${(result?.title ?? "summary").replace(/\s+/g, "_").slice(0,50)}.json`;
+    a.download = `${(result?.title ?? "summary")
+      .replace(/\s+/g, "_")
+      .slice(0, 50)}.json`;
     a.click();
   }
 
   function copySummary() {
-    navigator.clipboard.writeText(result?.overview ?? "");
-    alert("Overview copied");
+    if (!result?.overview) return;
+    navigator.clipboard.writeText(result.overview);
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="max-w-7xl mx-auto grid grid-cols-12 gap-6">
-        {/* Left column: input + video */}
-        <div className="col-span-12 lg:col-span-5">
-          <div className="bg-white rounded-2xl shadow p-5">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h1 className="text-2xl font-bold">YouTube Summarizer</h1>
-                <p className="text-sm text-slate-500 mt-1">Paste a YouTube URL and press Summarize.</p>
-              </div>
-              <div className="text-xs text-slate-400">Model: gpt-4o-mini</div>
-            </div>
+  function renderPreview() {
+    const label = sourceNames[sourceTab] || "content";
+    const placeholder = (
+      <div className="h-full w-full grid place-items-center text-slate-500 text-sm px-4 text-center">
+        {`Add a ${label} and click Generate Summary to preview it here.`}
+      </div>
+    );
 
-            <div className="mt-4 flex gap-2">
-              <input
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                placeholder="https://www.youtube.com/watch?v=..."
-                className="flex-1 border rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                aria-label="YouTube URL"
-              />
-              <button
-                onClick={analyze}
-                disabled={loading}
-                className="px-4 py-2 bg-indigo-600 text-white rounded-lg shadow hover:bg-indigo-700 disabled:opacity-60"
-              >
-                {loading ? "Working..." : "Summarize"}
-              </button>
-            </div>
+    if (!hasMatchingResult) return placeholder;
 
-            {error && <div className="mt-3 text-sm text-red-600">{error}</div>}
+    if (sourceTab === "youtube") {
+      if (!result?.video_id) return placeholder;
+      return (
+        <iframe
+          title={result.title || "video"}
+          src={`https://www.youtube.com/embed/${result.video_id}`}
+          className="w-full h-full"
+          allowFullScreen
+        />
+      );
+    }
 
-            <div className="mt-5">
-              {result ? (
-                <>
-                  <div className="aspect-w-16 aspect-h-9 bg-black rounded-lg overflow-hidden">
-                    <iframe
-                      title={result.title || "video"}
-                      src={`https://www.youtube.com/embed/${result.video_id}`}
-                      className="w-full h-full"
-                      allowFullScreen
-                    />
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between">
-                    <div>
-                      <div className="font-semibold">{result.title}</div>
-                      <div className="text-xs text-slate-500">{result.channel}</div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <button onClick={copySummary} className="text-sm text-slate-600 px-2 py-1 rounded bg-slate-100">Copy overview</button>
-                      <button onClick={downloadJSON} className="text-sm text-slate-600 px-2 py-1 rounded bg-slate-100 flex items-center gap-1">
-                        <IconDownload /> <span>Download JSON</span>
-                      </button>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="aspect-w-16 aspect-h-9 bg-slate-100 rounded-lg flex items-center justify-center text-slate-400">
-                  Video preview
-                </div>
-              )}
-            </div>
+    if (sourceTab === "web") {
+      // For web/text, just show a preview of the source content
+      return (
+        <div className="h-full w-full bg-[#0b1429] p-4 text-left text-slate-100">
+          <p className="text-xs text-slate-400 mb-2">Webpage Preview</p>
+          <div className="text-sm break-words line-clamp-2 font-semibold">
+            {result?.title || "Unknown URL"}
           </div>
+          <p className="mt-2 text-xs text-slate-400 line-clamp-5">
+            {result?.overview || "Summary available in the panel on the right."}
+          </p>
+        </div>
+      );
+    }
+
+    if (sourceTab === "text") {
+      const snippet = result?.source_input || result?.overview || "Long text preview";
+      return (
+        <div className="h-full w-full bg-[#0b1429] p-4 text-left text-slate-100 overflow-y-auto">
+          <p className="text-xs text-slate-400 mb-2">Text Input Snippet</p>
+          <p className="text-sm leading-relaxed whitespace-pre-wrap">
+            {snippet.slice(0, 500)}...
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="h-full w-full grid place-items-center text-slate-500 text-sm px-4 text-center">
+        {`${label} preview not available.`}
+      </div>
+    );
+  }
+  
+  /* ---------- UI ---------- */
+
+  return (
+    <div className="min-h-screen bg-[#0b1429] text-slate-100">
+      <div className="px-4 sm:px-6 lg:px-10 py-8 max-w-7xl mx-auto">
+        <div className="text-center max-w-5xl mx-auto">
+          <h1 className="text-3xl sm:text-4xl font-bold tracking-tight">
+            YouTube & Article Summarizer
+          </h1>
+          <p className="mt-3 text-lg text-slate-300">
+            Generate comprehensive and in-depth summaries for videos and articles, complete with Mind Maps and Quizzes.
+          </p>
         </div>
 
-        {/* Right column: hidden until result exists */}
-        {result ? (
-          <div className="col-span-12 lg:col-span-7">
-            <div className="bg-white rounded-2xl shadow p-5 h-[78vh] flex flex-col">
-              {/* tabs */}
-              <div className="flex items-center justify-between">
-                <div className="flex gap-2">
-                  <button
-                    className={`px-3 py-2 rounded-md ${tab === "summary" ? "bg-slate-100 font-semibold" : "text-slate-600"}`}
-                    onClick={() => setTab("summary")}
-                  >
-                    Summary
-                  </button>
-                  <button
-                    className={`px-3 py-2 rounded-md ${tab === "mindmap" ? "bg-slate-100 font-semibold" : "text-slate-600"}`}
-                    onClick={() => setTab("mindmap")}
-                  >
-                    Mind Map
-                  </button>
-                  <button
-                    className={`px-3 py-2 rounded-md ${tab === "chat" ? "bg-slate-100 font-semibold" : "text-slate-600"}`}
-                    onClick={() => setTab("chat")}
-                  >
-                    AI Chat
-                  </button>
-                </div>
+        {/* top tabs */}
+        <div className="mt-8">
+          <div className="flex flex-wrap justify-center gap-2 max-w-5xl mx-auto bg-[#101a30] border border-slate-800 rounded-2xl p-2 shadow-[0_15px_40px_rgba(0,0,0,0.25)]">
+            {sourceTabs.map((s) => (
+              <PillTab
+                key={s.key}
+                active={sourceTab === s.key}
+                label={s.label}
+                onClick={() => setSourceTab(s.key)}
+              />
+            ))}
+          </div>
 
-                <div className="flex items-center gap-3">
-                  <button onClick={() => setFlashOpen(true)} className="text-sm px-2 py-1 rounded bg-indigo-600 text-white">Flashcards</button>
-                  <button onClick={() => setQuizOpen(true)} className="text-sm px-2 py-1 rounded bg-emerald-600 text-white">Quiz</button>
-                  <button onClick={() => navigator.clipboard.writeText(window.location.href)} className="text-sm text-slate-600 px-2 py-1 rounded bg-slate-100">Share</button>
+          {/* Source Details */}
+          <div className="mt-4 grid gap-3 sm:grid-cols-3">
+            {sourceDetails.map((item) => (
+              <div
+                key={item.key}
+                className={`rounded-xl border ${
+                  sourceTab === item.key ? "border-sky-600" : "border-slate-800"
+                } bg-[#0f182d] p-3 flex flex-col gap-2`}
+              >
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-50">
+                      {item.title}
+                    </p>
+                    <p className="text-xs text-slate-400">{item.desc}</p>
+                  </div>
+                  {item.sample ? (
+                    <button
+                      onClick={() => {
+                        setSourceTab(item.key);
+                        setUrl(item.sample);
+                      }}
+                      className="text-[11px] px-2 py-1 rounded-full bg-[#152441] text-sky-200 border border-slate-700 hover:border-slate-600"
+                    >
+                      Use sample
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-slate-500">Paste text</span>
+                  )}
+                </div>
+                <div className="text-[11px] text-slate-500 truncate">
+                  {item.sample || "Paste your own text in the box below."}
                 </div>
               </div>
+            ))}
+          </div>
 
-              {/* content */}
-              <div className="mt-4 overflow-y-auto flex-1 pr-2">
-                {tab === "summary" && (
-                  <div>
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h2 className="text-xl font-bold">{result.title}</h2>
-                        <div className="text-sm text-slate-500">{result.channel}</div>
+          <div className="mt-5 max-w-5xl mx-auto bg-[#0f182d] border border-slate-800 rounded-2xl p-6 shadow-[0_20px_40px_rgba(0,0,0,0.35)]">
+            
+            {/* Input Section */}
+            <div className="space-y-4">
+              {/* YouTube Input */}
+              {sourceTab === "youtube" && (
+                <>
+                  <label className="text-xs uppercase tracking-wide text-slate-400 flex items-center justify-between">
+                    <span>Paste link for YouTube</span>
+                    <button
+                      onClick={() => setUrl("")}
+                      className="text-[11px] text-slate-300 hover:text-white"
+                    >
+                      Clear
+                    </button>
+                  </label>
+                  <textarea
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="Paste the YouTube video link, for example: https://www.youtube.com/watch?v=example"
+                    className={linkInputClass}
+                    aria-label="YouTube URL"
+                  />
+                </>
+              )}
+
+              {/* Web Input */}
+              {sourceTab === "web" && (
+                <>
+                  <label className="text-xs uppercase tracking-wide text-slate-400 flex items-center justify-between">
+                    <span>Paste link for webpage</span>
+                    <button
+                      onClick={() => setUrl("")}
+                      className="text-[11px] text-slate-300 hover:text-white"
+                    >
+                      Clear
+                    </button>
+                  </label>
+                  <textarea
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="Paste the article URL to summarize"
+                    className={linkInputClass}
+                    aria-label="Web URL"
+                  />
+                </>
+              )}
+
+              {/* Text Input */}
+              {sourceTab === "text" && (
+                <>
+                  <label className="text-xs uppercase tracking-wide text-slate-400">
+                    Paste long text
+                  </label>
+                  <textarea
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    placeholder="Paste your long text or notes here"
+                    className="w-full min-h-[200px] border border-slate-800 bg-[#0b1429] rounded-xl px-4 py-4 text-sm md:text-base text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
+                  />
+                </>
+              )}
+            </div>
+
+            {error && (
+              <div className="mt-3 text-sm text-red-200 bg-red-950/60 border border-red-800 rounded-lg px-3 py-2">
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={analyze}
+              disabled={loading}
+              className="mt-6 w-full h-14 bg-[#2c7cf6] hover:bg-[#1f6de4] disabled:opacity-60 text-base font-semibold text-white rounded-xl shadow-[0_15px_45px_rgba(44,124,246,0.35)] flex items-center justify-center gap-2"
+            >
+              {loading ? "Generating..." : "Generate Summary"}
+            </button>
+          </div>
+        </div>
+        
+        {/* results area */}
+        <div className="mt-10 max-w-6xl mx-auto grid grid-cols-1 xl:grid-cols-3 gap-6">
+          <div className="bg-[#0f182d] border border-slate-800 rounded-2xl p-4 shadow-lg">
+            <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.2em] text-slate-400">
+              <span>Preview</span>
+              <span className="px-2 py-1 rounded-full bg-[#101a30] border border-slate-800 text-[10px] text-slate-300">
+                Model gpt-4o-mini
+              </span>
+            </div>
+            <div className="mt-3 rounded-xl overflow-hidden border border-slate-800 aspect-video bg-[#0b1429]">
+              {renderPreview()}
+            </div>
+
+            {hasMatchingResult ? (
+              <div className="mt-3 flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium text-slate-50 line-clamp-2">
+                    {result.title}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {result.channel}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 justify-end">
+                  <button
+                    onClick={copySummary}
+                    className="text-[11px] px-2.5 py-1 rounded-full bg-[#101a30] text-slate-100 border border-slate-800 hover:bg-[#152441]"
+                  >
+                    <IconCopy /> <span className="ml-1">Copy overview</span>
+                  </button>
+                  <button
+                    onClick={downloadJSON}
+                    className="text-[11px] px-2.5 py-1 rounded-full bg-slate-50 text-slate-900 hover:bg-white flex items-center gap-1"
+                  >
+                    <IconDownload /> <span>JSON</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-slate-400">
+                Select {sourceNames[sourceTab]} and generate a summary to see a
+                preview here.
+              </p>
+            )}
+          </div>
+
+          <div className="xl:col-span-2 bg-[#0f182d] border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col">
+            {result ? (
+              <>
+                <div className="flex items-center justify-between gap-3 flex-wrap">
+                  <div className="flex gap-2 bg-[#101a30] border border-slate-800 rounded-full p-1">
+                    {["summary", "mindmap", "chat"].map((t) => (
+                      <button
+                        key={t}
+                        className={`px-3 py-1.5 text-[11px] rounded-full transition ${
+                          tab === t
+                            ? "bg-[#152441] text-sky-200 shadow-sm"
+                            : "text-slate-400 hover:text-slate-100"
+                        }`}
+                        onClick={() => setTab(t)}
+                      >
+                        {t === "summary"
+                          ? "Summary"
+                          : t === "mindmap"
+                          ? "Mind map"
+                          : "AI chat"}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-2 text-[12px]">
+                    <button
+                      onClick={() => setFlashOpen(true)}
+                      className="px-2.5 py-1 rounded-full bg-[#2c7cf6] text-white hover:bg-[#1f6de4]"
+                      disabled={flashcardCount === 0}
+                    >
+                      Flashcards ({flashcardCount})
+                    </button>
+                    <button
+                      onClick={() => setQuizOpen(true)}
+                      className="px-2.5 py-1 rounded-full bg-emerald-500 text-white hover:bg-emerald-600"
+                      disabled={quizCount === 0}
+                    >
+                      Quiz ({quizCount})
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-4 overflow-y-auto space-y-4 max-h-[26rem] pr-1">
+                  
+                  {/* SUMMARY TAB */}
+                  {tab === "summary" && (
+                    <>
+                      {/* Summary Metadata */}
+                      <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
+                        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                          <div>
+                            <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-wide text-slate-400 mb-1">
+                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                              <span>{result.type ?? sourceLabels[result.source] ?? "Content"}</span>
+                            </div>
+                            <h2 className="text-base sm:text-lg font-semibold text-slate-50">
+                              {result.title}
+                            </h2>
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              {result.channel}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap gap-2 text-[11px]">
+                            <div className="px-2.5 py-1 rounded-lg bg-[#0d162b] border border-slate-800 text-slate-200">
+                              Key points: {" "}
+                              <span className="font-semibold">
+                                {majorPoints.length}
+                              </span>
+                            </div>
+                            <div className="px-2.5 py-1 rounded-lg bg-[#0d162b] border border-slate-800 text-slate-200">
+                              Tags: {" "}
+                              <span className="font-semibold">
+                                {tags.length}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
                       </div>
 
-                      <div className="text-xs text-slate-400">{(result.type ?? "").toUpperCase()}</div>
-                    </div>
+                      {/* Core Message / Overview */}
+                      <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="text-sm font-semibold">Core Message (Summary)</h3>
+                          <button
+                            onClick={copySummary}
+                            className="text-[11px] px-2.5 py-1 rounded-full bg-[#0d162b] text-slate-200 border border-slate-800 hover:bg-[#152441]"
+                          >
+                            <IconCopy /> <span className="ml-1">Copy text</span>
+                          </button>
+                        </div>
+                        <p className="mt-2 text-sm leading-relaxed text-slate-100 whitespace-pre-wrap">
+                          {result.overview || "No overview provided."}
+                        </p>
 
-                    <p className="mt-3 text-slate-700">{result.overview}</p>
-
-                    <div className="mt-4 flex flex-wrap">
-                      {safeArray(result.major_points).slice(0, 8).map((p, i) => (
-                        <TimestampBadge key={i} ts={p.timestamp ?? p.start ?? ""} />
-                      ))}
-                    </div>
-
-                    {/* major points accordion */}
-                    <div className="mt-5 border rounded-lg overflow-hidden">
-                      {safeArray(result.major_points).length === 0 ? (
-                        <div className="p-4 text-sm text-slate-500 italic">No major points found.</div>
-                      ) : (
-                        safeArray(result.major_points).map((p, i) => <AccordionPoint key={i} p={p} index={i} />)
-                      )}
-                    </div>
-
-                    {/* terminology */}
-                    <div className="mt-5">
-                      <div className="flex items-center justify-between">
-                        <h3 className="text-lg font-semibold">Terminology & Concepts</h3>
-                        <div className="text-sm text-slate-500">{safeTerms(result.terminologies).length} items</div>
+                        <div className="mt-3 flex flex-wrap gap-1.5">
+                          {tags.length === 0 ? (
+                            <span className="text-[11px] text-slate-500 italic">
+                              No tags provided.
+                            </span>
+                          ) : (
+                            tags.map((tag, i) => (
+                              <span
+                                key={i}
+                                className="text-[11px] px-2 py-0.5 rounded-full bg-[#0d162b] text-slate-100 border border-slate-800"
+                              >
+                                {tag}
+                              </span>
+                            ))
+                          )}
+                        </div>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {safeTerms(result.terminologies).length === 0 ? (
-                          <div className="text-sm text-slate-500 italic">No terms extracted.</div>
+                      {/* Detailed Topic Breakdown / Chapters */}
+                      <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold">Detailed Topic Breakdown</h3>
+                          <span className="text-[11px] text-slate-400">
+                            {chapters.length} items
+                          </span>
+                        </div>
+
+                        {chapters.length === 0 ? (
+                          <p className="mt-2 text-sm text-slate-400 italic">
+                            No chapters generated.
+                          </p>
                         ) : (
-                          safeTerms(result.terminologies).map((t, i) => (
-                            <div key={i} className="p-3 border rounded bg-slate-50">
-                              <div className="font-medium">{t.term ?? t.name ?? `Term ${i + 1}`}</div>
-                              <div className="text-sm text-slate-600 mt-1">{t.definition ?? t.desc ?? ""}</div>
+                          <ul className="mt-2 space-y-2">
+                            {chapters.map((c, i) => {
+                              const title = c.title || c.summary || `Chapter ${i + 1}`;
+                              const ts = c.timestamp ?? c.start ?? "";
+                              return (
+                                <li
+                                  key={i}
+                                  className="flex items-start gap-2 text-sm"
+                                >
+                                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-500" />
+                                  <div className="flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-medium text-slate-50">
+                                        {title}
+                                      </span>
+                                      {sourceTab === 'youtube' && <TimestampBadge ts={ts} />}
+                                    </div>
+                                    {c.summary && (
+                                      <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                                        {c.summary}
+                                      </p>
+                                    )}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+
+                      {/* Key Takeaways / Major Points */}
+                      <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
+                        <div className="flex items-center justify-between">
+                          <h3 className="text-sm font-semibold">
+                            Key Takeaways
+                          </h3>
+                          <span className="text-[11px] text-slate-400">
+                            {majorPoints.length} items
+                          </span>
+                        </div>
+
+                        {majorPoints.length === 0 ? (
+                          <p className="mt-2 text-sm text-slate-400 italic">
+                            No key takeaways found.
+                          </p>
+                        ) : (
+                          <ul className="mt-2 space-y-2">
+                            {majorPoints.map((p, i) => {
+                              const title =
+                                p.title || p.summary || `Point ${i + 1}`;
+                              const ts = p.timestamp ?? p.start ?? "";
+                              return (
+                                <li
+                                  key={i}
+                                  className="flex items-start gap-2 text-sm"
+                                >
+                                  <span className="mt-1 h-1.5 w-1.5 rounded-full bg-slate-500" />
+                                  <div className="flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="font-medium text-slate-50">
+                                        {title}
+                                      </span>
+                                      {sourceTab === 'youtube' && <TimestampBadge ts={ts} />}
+                                    </div>
+                                    {p.summary && (
+                                      <p className="text-xs text-slate-300 mt-0.5 leading-relaxed">
+                                        {p.summary}
+                                      </p>
+                                    )}
+                                  </div>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+
+                      {/* Key Terms & Concepts / Terminology */}
+                      <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="text-sm font-semibold">
+                            Key Terms & Concepts
+                          </h3>
+                          <span className="text-[11px] text-slate-400">
+                            {terms.length} items
+                          </span>
+                        </div>
+
+                        {terms.length === 0 ? (
+                          <p className="mt-2 text-sm text-slate-400 italic">
+                            No terms extracted.
+                          </p>
+                        ) : (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {terms.map((t, i) => (
+                              <div
+                                key={i}
+                                className="px-2.5 py-1 rounded-full bg-[#0d162b] text-[12px] text-slate-100 border border-slate-800"
+                              >
+                                <span className="font-semibold">
+                                  {t.term ?? t.name ?? `Term ${i + 1}`}:
+                                </span>{" "}
+                                {t.definition ?? t.desc ?? ""}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* MINDMAP TAB (Restored) */}
+                  {tab === "mindmap" && (
+                    <>
+                      <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <h3 className="text-sm font-semibold">Mind map</h3>
+                            <div className="flex gap-2">
+                              <button className="text-[11px] px-2 py-1 rounded-full bg-[#0d162b] text-slate-200 border border-slate-800 hover:bg-[#152441]">
+                                Expand
+                              </button>
+                              <button className="text-[11px] px-2 py-1 rounded-full bg-[#0d162b] text-slate-200 border border-slate-800 hover:bg-[#152441]">
+                                Collapse
+                              </button>
+                            </div>
+                          </div>
+                          <p className="text-xs text-slate-400">
+                            Clean outline of the main topics and subtopics
+                            extracted from the content.
+                          </p>
+                        </div>
+                      </div>
+
+                      {normalizedMindmap.length === 0 ? (
+                        <div className="rounded-xl border border-dashed border-slate-800 bg-[#0d162b] p-4 text-sm text-slate-400 italic">
+                          No mindmap was generated for this content.
+                        </div>
+                      ) : (
+                        <div className="rounded-xl border border-slate-800 bg-[#101a30] p-4">
+                          <div className="space-y-4">
+                            {normalizedMindmap.map((node, i) => (
+                              <MindmapNode key={i} node={node} />
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* CHAT TAB (Restored) */}
+                  {tab === "chat" && (
+                    <div className="flex flex-col h-full">
+                      <div className="flex-1 overflow-y-auto p-1.5 space-y-3">
+                        {chatHistory.length === 0 ? (
+                          <div className="text-sm text-slate-400 italic">
+                            Ask follow-up questions about this content here.
+                          </div>
+                        ) : (
+                          chatHistory.map((m, i) => (
+                            <div
+                              key={i}
+                              className={`max-w-[85%] ${
+                                m.role === "user" ? "ml-auto text-right" : ""
+                              }`}
+                            >
+                              <div
+                                className={`inline-block px-3 py-2 rounded-lg text-sm ${
+                                  m.role === "user"
+                                    ? "bg-[#2c7cf6] text-white"
+                                    : "bg-[#101a30] text-slate-50 border border-slate-800"
+                                }`}
+                              >
+                                {m.content}
+                              </div>
                             </div>
                           ))
                         )}
                       </div>
+
+                      <div className="mt-3 flex gap-2">
+                        <input
+                          ref={chatRef}
+                          placeholder="Ask about the content..."
+                          className="flex-1 px-3 py-2 text-sm rounded-lg border border-slate-800 bg-[#0d162b] text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500/60"
+                        />
+                        <button
+                          onClick={sendChat}
+                          className="px-4 py-2 rounded-lg bg-[#2c7cf6] text-white text-sm hover:bg-[#1f6de4]"
+                        >
+                          Send
+                        </button>
+                      </div>
                     </div>
-
-                    {/* raw JSON */}
-                    <details className="mt-6 bg-slate-50 p-3 rounded">
-                      <summary className="cursor-pointer">Raw API response</summary>
-                      <pre className="mt-2 text-xs whitespace-pre-wrap max-h-72 overflow-y-auto">{JSON.stringify(result, null, 2)}</pre>
-                    </details>
-                  </div>
-                )}
-
-                {tab === "mindmap" && (
-                  <div>
-                    <h3 className="text-lg font-semibold">Mind Map</h3>
-                    {result.mindmap ? (
-                      <pre className="mt-3 text-sm whitespace-pre-wrap max-h-[60vh] overflow-y-auto">{JSON.stringify(result.mindmap, null, 2)}</pre>
-                    ) : (
-                      <div className="mt-3 text-sm text-slate-500 italic">No mindmap generated for this video.</div>
-                    )}
-                  </div>
-                )}
-
-                {tab === "chat" && (
-                  <div className="flex flex-col h-full">
-                    <div className="flex-1 overflow-y-auto p-2 space-y-3">
-                      {chatHistory.length === 0 ? (
-                        <div className="text-sm text-slate-500 italic">Ask follow-up questions about this video above.</div>
-                      ) : (
-                        chatHistory.map((m, i) => (
-                          <div key={i} className={`max-w-[85%] ${m.role === "user" ? "ml-auto text-right" : ""}`}>
-                            <div className={`inline-block p-2 rounded ${m.role === "user" ? "bg-indigo-50" : "bg-slate-100"}`}>
-                              <div className="text-sm">{m.content}</div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    <div className="mt-3 flex gap-2">
-                      <input ref={chatRef} placeholder="Ask about the video..." className="flex-1 p-2 border rounded" />
-                      <button onClick={sendChat} className="px-4 py-2 bg-indigo-600 text-white rounded">Send</button>
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="flex-1 min-h-[22rem] bg-[#0d162b] border border-dashed border-slate-800 rounded-xl grid place-items-center text-center px-8">
+                <div>
+                  <p className="text-lg font-semibold text-slate-100">
+                    Ready when you are
+                  </p>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Paste a link above and click Generate Summary to view the
+                    full features here.
+                  </p>
+                </div>
               </div>
-            </div>
+            )}
           </div>
-        ) : (
-          <div className="col-span-12 lg:col-span-7 flex items-center justify-center">
-            <div className="text-center text-slate-400">
-              <h3 className="text-lg font-semibold">No video selected</h3>
-              <p className="text-sm">Paste a YouTube URL and click <span className="font-semibold">Summarize</span>.</p>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
-
-      {/* Flashcards modal */}
-      <Modal title="Flashcards" open={flashOpen} onClose={() => setFlashOpen(false)}>
+      
+      {/* Flashcards modal (Restored) */}
+      <Modal
+        title="Flashcards"
+        open={flashOpen}
+        onClose={() => setFlashOpen(false)}
+      >
         {safeArray(result?.flashcards).length === 0 ? (
-          <div className="text-sm text-slate-500 italic p-3">No flashcards provided.</div>
+          <div className="text-sm text-slate-300 italic">No flashcards provided.</div>
         ) : (
           safeArray(result.flashcards).map((f, i) => (
-            <div key={i} className="p-3 border-b last:border-none">
-              <div className="font-semibold">{f.q ?? f.question ?? `Q${i + 1}`}</div>
-              <div className="text-sm text-slate-700 mt-1">{f.a ?? f.answer ?? ""}</div>
+            <div
+              key={i}
+              className="py-2 border-b border-slate-800 last:border-none"
+            >
+              <div className="font-semibold text-sm">
+                {f.q ?? f.question ?? `Q${i + 1}`}
+              </div>
+              <div className="text-sm text-slate-200 mt-1">
+                {f.a ?? f.answer ?? ""}
+              </div>
             </div>
           ))
         )}
       </Modal>
 
-      {/* Quiz modal */}
-      <Modal title="Quiz (MCQs)" open={quizOpen} onClose={() => setQuizOpen(false)}>
+      {/* Quiz modal (Restored) */}
+      <Modal
+        title="Quiz (MCQs)"
+        open={quizOpen}
+        onClose={() => setQuizOpen(false)}
+      >
         {safeArray(result?.quiz).length === 0 ? (
-          <div className="text-sm text-slate-500 italic p-3">No quiz provided.</div>
+          <div className="text-sm text-slate-300 italic">No quiz provided.</div>
         ) : (
           safeArray(result.quiz).map((q, i) => (
-            <div key={i} className="p-3 border-b last:border-none">
-              <div className="font-semibold">{q.q ?? q.question ?? `Question ${i + 1}`}</div>
-              <ul className="mt-2 text-sm list-disc ml-5">
+            <div
+              key={i}
+              className="py-2 border-b border-slate-800 last:border-none"
+            >
+              <div className="font-semibold text-sm">
+                {q.q ?? q.question ?? `Question ${i + 1}`}
+              </div>
+              <ul className="mt-2 text-sm list-disc ml-5 space-y-1">
                 {safeArray(q.choices).map((c, j) => (
-                  <li key={j} className={`${c === q.answer ? "font-medium" : ""}`}>{c}</li>
+                  <li
+                    key={j}
+                    className={c === q.answer ? "font-medium" : ""}
+                  >
+                    {c}
+                  </li>
                 ))}
               </ul>
-              <div className="text-xs text-slate-400 mt-2">Answer: {q.answer}</div>
+              <div className="text-xs text-slate-400 mt-2">
+                Answer: {q.answer}
+              </div>
             </div>
           ))
         )}
       </Modal>
     </div>
   );
-}
-
-/* helper to extract id from common YouTube urls */
-function extractIdFromUrl(url) {
-  if (!url) return "";
-  try {
-    const m = url.match(/[?&]v=([A-Za-z0-9_-]{11})/);
-    if (m) return m[1];
-    const m2 = url.match(/youtu\.be\/([A-Za-z0-9_-]{11})/);
-    if (m2) return m2[1];
-    // try to parse embed urls
-    const m3 = url.match(/\/embed\/([A-Za-z0-9_-]{11})/);
-    if (m3) return m3[1];
-  } catch {}
-  return "";
 }

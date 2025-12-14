@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+cd "$(dirname "$0")"
+if [ -f ".venv/bin/activate" ]; then
+  source ".venv/bin/activate"
+fi
+
+# Load .env into environment
+if [ -f ".env" ]; then
+  set -a
+  source ".env"
+  set +a
+fi
 set -euo pipefail
 
 # run.sh
