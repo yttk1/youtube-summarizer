@@ -354,6 +354,59 @@ def normalize_terms_and_points(payload: dict) -> dict:
     safe_normalize_list('flashcards', default_item={'q': '', 'a': ''})
     safe_normalize_list('quiz', default_item={'q': '', 'choices': [], 'answer': ''})
 
+    # Ensure quiz items are consistent and always have 4 choices.
+    quiz = payload.get("quiz")
+    if isinstance(quiz, list):
+        normalized_quiz = []
+        for item in quiz:
+            if not isinstance(item, dict):
+                continue
+
+            q_text = item.get("q") or item.get("question") or ""
+            answer = item.get("answer") or item.get("a") or item.get("correct") or item.get("correct_answer") or ""
+            raw_choices = item.get("choices") or item.get("options") or item.get("answers") or []
+
+            if isinstance(raw_choices, str):
+                raw_choices = [c.strip() for c in re.split(r"[\r\n]+|[|;/]", raw_choices) if c.strip()]
+            elif not isinstance(raw_choices, list):
+                raw_choices = []
+
+            cleaned = []
+            for c in raw_choices:
+                if c is None:
+                    continue
+                s = str(c).strip()
+                if s and s not in cleaned:
+                    cleaned.append(s)
+
+            ans = str(answer).strip() if answer is not None else ""
+            if ans and ans not in cleaned:
+                cleaned.append(ans)
+
+            # Keep exactly 4 choices, making sure the answer is included.
+            if len(cleaned) > 4:
+                if ans and ans in cleaned[:4]:
+                    cleaned = cleaned[:4]
+                elif ans:
+                    cleaned = cleaned[:3] + [ans]
+                else:
+                    cleaned = cleaned[:4]
+
+            if len(cleaned) < 4:
+                fillers = ["None of the above", "All of the above", "Not enough information", "Cannot be determined"]
+                for f in fillers:
+                    if len(cleaned) >= 4:
+                        break
+                    if f not in cleaned and f != ans:
+                        cleaned.append(f)
+                while len(cleaned) < 4:
+                    cleaned.append(f"Option {len(cleaned) + 1}")
+
+            if q_text.strip() and ans:
+                normalized_quiz.append({"q": q_text.strip(), "choices": cleaned[:4], "answer": ans})
+
+        payload["quiz"] = normalized_quiz
+
     return payload
 
 
