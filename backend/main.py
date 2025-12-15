@@ -196,6 +196,8 @@ def fetch_transcript_via_yt_dlp(video_id: str, languages: List[str] | None = Non
     if not parsed:
         raise NoTranscriptFound(f"Could not parse captions from yt-dlp track ({ext}) for video {video_id}")
 
+
+    
     return parsed
 
 
@@ -617,6 +619,11 @@ async def analyze(req: AnalyzeRequest):
         parsed.setdefault("source_input", req.url)
 
         normalize_terms_and_points(parsed)
+        parsed["transcript"] = transcript_entries
+        parsed["duration"] = (
+            max((e.get("start", 0) + e.get("duration", 0)) for e in transcript_entries)
+            if transcript_entries else None
+        )
 
         return parsed
     
