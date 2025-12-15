@@ -6,6 +6,8 @@ Files:
 - logs/      -> runtime logs are written here
 - .env       -> created locally during setup (do NOT commit)
 
+First do: git clone https://github.com/yttk1/youtube-summarizer.git
+
 I. Quick start (Ubuntu):
 1. Make scripts executable:
    chmod +x setup.sh run.sh
@@ -28,7 +30,7 @@ Notes:
 - The OpenAI API key is only written to .env and used server-side by the backend; it is never included in frontend bundles.
 
   
-Quick Start (macOS)
+II. Quick Start (macOS)
 1️. Install Homebrew (if missing)
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 
@@ -50,7 +52,7 @@ http://localhost:5173
 
 
 
-II. Quick Start (Windows)
+III. Quick Start (Windows)
 Prerequisites
 
 Windows 10 / 11
