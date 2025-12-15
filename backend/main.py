@@ -54,7 +54,7 @@ class AnalyzeRequest(BaseModel):
     source: Optional[str] = None
 
 class ChatRequest(BaseModel):
-    url: str
+    context: Dict[str, Any] = {}
     history: List[Dict[str, str]]
 
 
@@ -629,39 +629,48 @@ async def analyze(req: AnalyzeRequest):
 # --- /api/chat endpoint (Restored) ---
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
-    # For chat, we only need the context, not the full analysis, but we re-use the analyze call structure
-    temp_analyze_req = AnalyzeRequest(url=req.url, source=req.history[0].get('source', 'youtube') if req.history else 'youtube')
-    try:
-        # Use the logic from the analyze function to get the video context (title, overview, points)
-        analysis_result = await analyze(temp_analyze_req)
-    except Exception as e:
-        # Handle cases where analysis fails (e.g., no transcript)
-        return JSONResponse(status_code=500, content={"error": "analysis_failed", "detail": str(e)})
+    context = req.context or {}
 
-    # If the result is a JSONResponse, pass it back (e.g., missing URL error)
-    if isinstance(analysis_result, JSONResponse):
-        return analysis_result
+    context_text = (
+        f"Title: {context.get('title', '')}\n"
+        f"Overview: {context.get('overview', '')}\n\n"
+        "Key Topics:\n"
+    )
 
-    # Construct chat context from the analysis result
-    context_text = f"Title: {analysis_result.get('title')}\nChannel: {analysis_result.get('channel')}\nOverview: {analysis_result.get('overview')}\n\nKey Topics:\n"
-    # Use chapters as context for specific time references
-    for c in analysis_result.get("chapters", [])[:10]:
-        context_text += f"- [{c.get('timestamp','?')}]{c.get('title','')} — {c.get('summary','')}\n"
+    for c in context.get("chapters", [])[:10]:
+        context_text += (
+            f"- [{c.get('timestamp','')}] "
+            f"{c.get('title','')} — {c.get('summary','')}\n"
+        )
 
-    # Define the system prompt for the chat model
     messages = [
-        {"role": "system", "content": "You are a helpful assistant specialized in answering questions based ONLY on the provided content context. Use timestamps [mm:ss] when referring to specific parts of a video."},
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful assistant. "
+                "Answer ONLY using the provided context. "
+                "Use timestamps when relevant."
+            ),
+        },
         {"role": "system", "content": context_text},
     ]
-    
-    # Append chat history
+
     for h in req.history:
-        messages.append({"role": h.get("role"), "content": h.get("content")})
+        messages.append(
+            {"role": h.get("role"), "content": h.get("content")}
+        )
 
     try:
-        resp = await call_openai(messages, temperature=0.2, max_tokens=MAX_OUTPUT_TOKENS)
+        resp = await call_openai(
+            messages,
+            temperature=0.2,
+            max_tokens=800,
+        )
     except Exception as e:
-        return JSONResponse(status_code=500, content={"error": "openai_chat_failed", "detail": str(e)})
+        return JSONResponse(
+            status_code=500,
+            content={"error": "openai_chat_failed", "detail": str(e)},
+        )
 
-    answer_text = extract_text_from_responses_api(resp)
-    return {"answer": answer_text}
+    answer = extract_text_from_responses_api(resp)
+    return {"answer": answer}
