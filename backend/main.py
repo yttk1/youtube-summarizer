@@ -24,16 +24,7 @@ from pathlib import Path
 # --- Configuration ---
 ROOT = Path(__file__).resolve().parents[1]
 load_dotenv(ROOT / ".env")
-
-print("=== ENV DEBUG START ===")
-print("CWD:", os.getcwd())
-print("ENV FILE EXPECTED AT:", ROOT / ".env")
-print("OPENAI_API_KEY exists:", "OPENAI_API_KEY" in os.environ)
-print("OPENAI_API_KEY value:", os.environ.get("OPENAI_API_KEY"))
-print("OPENAI_API_KEY length:", len(os.environ.get("OPENAI_API_KEY", "")))
-print("=== ENV DEBUG END ===")
-def get_openai_key():
-    return os.environ.get("OPENAI_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
 
 try:
     import yt_dlp
@@ -49,7 +40,7 @@ app = FastAPI(title="YouTube & Article Summarizer API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -64,8 +55,7 @@ class AnalyzeRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     context: Dict[str, Any] = {}
-    history: List[Dict[str, Any]] = []
-
+    history: List[Dict[str, str]]
 
 
 # --- Utility: extract video id (Keep) ---
@@ -391,54 +381,21 @@ async def summarize_text_block(text: str, source_label: str = "text", title_hint
         trimmed = trimmed[:20000]
     
     # Restored features (mindmap, flashcards, quiz) to schema
-    system_prompt = """
-    You are an assistant that returns JSON ONLY (no markdown).
-
-    Schema keys must include:
-    title, overview, tags, chapters, major_points, terminologies, mindmap, flashcards, quiz.
-
-    Mindmap must be pure JSON (no prose), rooted in a central theme with 4–6 branches,
-    each branch having a summary and 3–4 children using the {title, summary, children} format.
-
-    Flashcards must be 6–12 items.
-    Quiz must be 5–10 MCQs with 4 choices each.
-
-    Core Content requirements (MUST BE FOLLOWED STRICTLY):
-
-    - title:
-    MUST be a new, concise, and engaging title (Summary Title).
-
-    - overview:
-    MUST be 2–3 dense paragraphs summarizing the core message, key findings,
-    or primary conclusion (Core Message).
-
-    - major_points:
-    MUST contain 3–5 key moments.
-    EACH major_point MUST include:
-        - title (short, descriptive)
-        - timestamp (mm:ss)
-        - summary: a VERY DETAILED explanation (3–5 full sentences) explaining:
-            * what is being said
-            * why it matters
-            * how it connects to the overall message
-            * any scientific, psychological, or factual reasoning used
-    The summary MUST be suitable for understanding the moment WITHOUT watching the video.
-
-    - chapters:
-    MUST contain 5–8 major sections, using section titles or markers
-    (instead of timestamps) in the 'timestamp' field.
-    Each chapter MUST include a short title and a 1–2 sentence factual summary.
-
-    - terminologies:
-    MUST contain 3–7 important vocabulary or core concepts with concise definitions.
-
-    - tags:
-    MUST contain 6–12 short tags (no hashtags), derived from the text.
-
-    Keep the output language consistent with the source text.
-    Return strictly valid JSON and nothing else.
-    """
-
+    system_prompt = (
+        "You are an assistant that returns JSON ONLY (no markdown). "
+        "Schema keys must include: title, overview, tags, chapters, major_points, terminologies, mindmap, flashcards, quiz. "
+        "Mindmap must be pure JSON (no prose), rooted in a central theme with 4-6 branches, each branch having a summary and 3-4 children using the {title, summary, children} format. "
+        "Flashcards must be 6-12 items. Quiz must be 5-10 MCQs with 4 choices each. "
+        ""
+        "Core Content requirements (MUST BE FOLLOWED STRICTLY): "
+        "- title: MUST be a new, concise, and engaging title (Summary Title). "
+        "- overview: MUST be 2-3 dense paragraphs summarizing the core message, key findings, or primary conclusion (Core Message). "
+        "- major_points: MUST contain 3-5 high-impact, actionable insights derived from the text (Key Takeaways). "
+        "- chapters: MUST contain 5-8 major sections, using section titles/markers (instead of timestamps) in the 'timestamp' field. Each has a short title and 1-2 sentence summary with concrete facts (Detailed Topic Breakdown). "
+        "- terminologies: MUST contain 3-7 important vocabulary/concepts with concise definitions (Key Terms & Concepts). "
+        "- tags: MUST contain 6-12 short tags (no hashtags), derived from the text. "
+        "Keep the output language consistent with the source text. Return strictly JSON."
+    )
 
     user_payload = (
         f"SOURCE_TYPE: {source_label}\n"
@@ -449,8 +406,6 @@ async def summarize_text_block(text: str, source_label: str = "text", title_hint
         "- Return strictly JSON with no extra text."
     )
 
-
-    
     resp = await call_openai(
         [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_payload}],
         temperature=0.2,
@@ -491,76 +446,41 @@ async def summarize_text_block(text: str, source_label: str = "text", title_hint
 
 
 # --- OpenAI Responses API helper (Keep) ---
-
-
-async def call_openai(messages: list, temperature=0.2, max_tokens=800):
-    api_key = get_openai_key()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
-
+async def call_openai(messages: list, temperature: float = 0.1, max_tokens: int = MAX_OUTPUT_TOKENS) -> dict:
+    if not OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY is not set in environment")
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
         "Content-Type": "application/json",
     }
-
     payload = {
         "model": MODEL,
-        "input": [
-            {
-                "role": "user",
-                "content": messages
-            }
-        ],
+        "input": messages,
         "temperature": temperature,
         "max_output_tokens": max_tokens,
     }
-
     async with httpx.AsyncClient(timeout=120.0) as client:
         r = await client.post(OPENAI_RESPONSES_URL, json=payload, headers=headers)
-        r.raise_for_status()
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError:
+            raise RuntimeError(f"OpenAI API error: {r.status_code} {r.text}")
         return r.json()
-    
-
-async def call_openai_text(prompt: str, temperature: float = 0.2, max_tokens: int = 800) -> dict:
-    api_key = get_openai_key()
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is not set")
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": MODEL,
-        "input": prompt,          # ✅ STRING
-        "temperature": temperature,
-        "max_output_tokens": max_tokens,
-    }
-
-    async with httpx.AsyncClient(timeout=120.0) as client:
-        r = await client.post(OPENAI_RESPONSES_URL, json=payload, headers=headers)
-        r.raise_for_status()
-        return r.json()
-
 
 def extract_text_from_responses_api(resp_json: dict) -> str:
     if not isinstance(resp_json, dict):
-        return ""
-
-    # 1. Fast path
-    if isinstance(resp_json.get("output_text"), str):
-        return resp_json["output_text"].strip()
-
-    # 2. Normal output array
-    output = []
+        return str(resp_json)
+    out = ""
     for item in resp_json.get("output", []):
-        for c in item.get("content", []):
-            if c.get("type") in ("output_text", "text"):
-                output.append(c.get("text", ""))
-
-    return "".join(output).strip()
-
+        if isinstance(item, dict) and item.get("type") == "message":
+            for c in item.get("content", []):
+                if c.get("type") == "output_text":
+                    out += c.get("text", "")
+    if out:
+        return out
+    if "output_text" in resp_json:
+        return resp_json["output_text"]
+    return json.dumps(resp_json)
 
 # --- /api/analyze endpoint (Finalized Source Handling) ---
 @app.post("/api/analyze")
@@ -618,26 +538,6 @@ async def analyze(req: AnalyzeRequest):
 
         try:
             transcript_entries = await fetch_transcript(vid, languages=["vi", "en", "en-US", "en-GB"])
-            # --- Build transcript outputs for frontend ---
-
-            video_duration = max(
-                (e.get("start", 0) + e.get("duration", 0)) for e in transcript_entries
-            ) if transcript_entries else 0
-
-            structured_transcript = [
-                {
-                    "timestamp": format_timestamp(e["start"]),
-                    "start": e["start"],
-                    "text": e["text"],
-                }
-                for e in transcript_entries
-            ]
-
-            plain_transcript_text = "\n".join(
-                f"[{format_timestamp(e['start'])}] {e['text']}"
-                for e in transcript_entries
-            )
-
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": "transcript_error", "detail": str(e)})
 
@@ -715,9 +615,6 @@ async def analyze(req: AnalyzeRequest):
         parsed.setdefault("source", "youtube")
         parsed.setdefault("video_id", vid)
         parsed.setdefault("source_input", req.url)
-        parsed["transcript"] = structured_transcript
-        parsed["transcript_text"] = plain_transcript_text
-        parsed["duration"] = video_duration
 
         normalize_terms_and_points(parsed)
 
@@ -732,46 +629,48 @@ async def analyze(req: AnalyzeRequest):
 # --- /api/chat endpoint (Restored) ---
 @app.post("/api/chat")
 async def chat(req: ChatRequest):
+    context = req.context or {}
+
+    context_text = (
+        f"Title: {context.get('title', '')}\n"
+        f"Overview: {context.get('overview', '')}\n\n"
+        "Key Topics:\n"
+    )
+
+    for c in context.get("chapters", [])[:10]:
+        context_text += (
+            f"- [{c.get('timestamp','')}] "
+            f"{c.get('title','')} — {c.get('summary','')}\n"
+        )
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful assistant. "
+                "Answer ONLY using the provided context. "
+                "Use timestamps when relevant."
+            ),
+        },
+        {"role": "system", "content": context_text},
+    ]
+
+    for h in req.history:
+        messages.append(
+            {"role": h.get("role"), "content": h.get("content")}
+        )
+
     try:
-        ctx = req.context or {}
-
-        context_text = f"""
-Title: {ctx.get('title')}
-Overview: {ctx.get('overview')}
-
-Key Moments:
-"""
-        for m in (ctx.get("major_points") or [])[:5]:
-            context_text += f"- [{m.get('timestamp')}] {m.get('title')}: {m.get('summary')}\n"
-
-        prompt = "SYSTEM:\nYou are a helpful assistant.\n\n"
-        prompt += context_text.strip() + "\n\n"
-
-        for m in (req.history or []):
-            if not isinstance(m, dict):
-                continue
-            content = m.get("content")
-            if isinstance(content, str) and content.strip():
-                prompt += f"{m.get('role','user').upper()}: {content}\n"
-
-
-
-        resp = await call_openai_text(prompt, temperature=0.2, max_tokens=800)
-        answer = extract_text_from_responses_api(resp)
-
-
-        
-        print("=== CHAT RAW RESPONSE ===")
-        print(json.dumps(resp, indent=2)[:2000])
-        print("=== CHAT TEXT ===")
-        print(answer)
-
-        return {"answer": answer or "I couldn’t generate a response."}
-
+        resp = await call_openai(
+            messages,
+            temperature=0.2,
+            max_tokens=800,
+        )
     except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return {
-            "answer": "⚠️ Server error while generating response. Check backend logs."
-        }
+        return JSONResponse(
+            status_code=500,
+            content={"error": "openai_chat_failed", "detail": str(e)},
+        )
 
+    answer = extract_text_from_responses_api(resp)
+    return {"answer": answer}
