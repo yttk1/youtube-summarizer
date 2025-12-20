@@ -31,7 +31,12 @@ function groupTranscriptByPercent(transcript, duration) {
   const groups = new Map();
 
   transcript.forEach((line) => {
-    const start = Math.floor(line.start || 0);
+    const start = Math.floor(
+      typeof line.start === "number"
+        ? line.start
+        : parseTimestampToSeconds(line.start) ?? 0
+    );
+
     const bucket = Math.floor(start / blockSize) * blockSize;
 
     if (!groups.has(bucket)) {
@@ -1025,7 +1030,7 @@ export default function App() {
         <div className="relative h-full">
           <iframe
             id="yt-player"
-            src={`https://www.youtube.com/embed/${result.video_id}?enablejsapi=1`}
+            src={`https://www.youtube.com/embed/${result.video_id}?enablejsapi=1&origin=${window.location.origin}`}
             className="w-full h-full rounded-xl"
             allow="autoplay; encrypted-media"
             allowFullScreen
@@ -1275,13 +1280,14 @@ export default function App() {
                   Select {sourceNames[sourceTab]} and generate a summary to see a preview here.
                 </p>
               )}
-
-              <TranscriptBlock
-                transcript={result?.transcript}
-                onSeek={(sec) => seekYouTubeIframe(sec)}
-                onCopy={copyTranscript}
-              />
-
+              {result?.transcript && (
+                <TranscriptBlock
+                  transcript={result.transcript}
+                  duration={result.duration}
+                  onSeek={(sec) => seekYouTubeIframe(sec)}
+                  onCopy={copyTranscript}
+                />
+              )}
             </div>
 
             <div className="bg-white/5 border border-white/10 rounded-3xl p-5 shadow-[0_20px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl">
@@ -1436,12 +1442,14 @@ export default function App() {
                     {/* TRANSCRIPT TAB */}
                     {tab === "transcript" && (
                       <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                        <TranscriptBlock
-                          transcript={result?.transcript}
-                          onSeek={(sec) => seekYouTubeIframe(sec)}
-                          onCopy={copyTranscript}
-                        />
-
+                        {result?.transcript && (
+                          <TranscriptBlock
+                            transcript={result.transcript}
+                            duration={result.duration}
+                            onSeek={(sec) => seekYouTubeIframe(sec)}
+                            onCopy={copyTranscript}
+                          />
+                        )}
                       </div>
                     )}
 
