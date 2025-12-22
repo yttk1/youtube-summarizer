@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 
 
 const API_BASE = import.meta.env.VITE_API_BASE;
@@ -256,11 +256,29 @@ function TimestampBadge({ ts }) {
   );
 }
 
-function Modal({ title, open, onClose, children }) {
+function Modal({ title, open, onClose, children, panelClassName, bodyClassName }) {
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") onClose?.();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose]);
+
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-      <div className="bg-[#0c111f] text-slate-50 rounded-2xl shadow-2xl border border-white/10 max-w-2xl w-full">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onClose?.();
+      }}
+    >
+      <div
+        className={`bg-[#0c111f] text-slate-50 rounded-2xl shadow-2xl border border-white/10 flex flex-col ${
+          panelClassName ?? "max-w-2xl w-full"
+        }`}
+      >
         <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
           <h3 className="font-semibold text-base">{title}</h3>
           <button
@@ -270,7 +288,7 @@ function Modal({ title, open, onClose, children }) {
             X
           </button>
         </div>
-        <div className="p-5 max-h-[65vh] overflow-y-auto">{children}</div>
+        <div className={bodyClassName ?? "p-5 max-h-[65vh] overflow-y-auto"}>{children}</div>
       </div>
     </div>
   );
@@ -314,6 +332,235 @@ function MindmapNode({ node, depth = 0 }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/* ---------- Mindmap helpers (web-native mindmap section) ---------- */
+
+function getMindmapLabel(node) {
+  if (!node) return "Untitled";
+  return node.title || node.topic || node.name || node.heading || "Untitled";
+}
+
+function getMindmapChildren(node) {
+  if (!node) return [];
+  if (Array.isArray(node.children)) return node.children;
+  if (Array.isArray(node.subtopics)) return node.subtopics;
+  if (Array.isArray(node.items)) return node.items;
+  return [];
+}
+
+function normalizeMindmapNode(raw, pathParts) {
+  const id = raw?.id ? String(raw.id) : `mm-${pathParts.join("-") || "0"}`;
+  const title = getMindmapLabel(raw);
+  const summary = typeof raw?.summary === "string" ? raw.summary : typeof raw?.notes === "string" ? raw.notes : "";
+  const ts = raw?.ts ?? raw?.timestamp ?? raw?.start ?? null;
+  const children = getMindmapChildren(raw).map((child, idx) => normalizeMindmapNode(child, [...pathParts, idx]));
+  return { id, title, summary, ts, children };
+}
+
+function buildMindmapRoot(roots, titleHint) {
+  const normalizedRoots = (roots || []).map((r, idx) => normalizeMindmapNode(r, [idx]));
+  if (normalizedRoots.length === 0) return null;
+  if (normalizedRoots.length === 1) return normalizedRoots[0];
+  return {
+    id: "mm-root",
+    title: titleHint || "Mind Map",
+    summary: "",
+    ts: null,
+    children: normalizedRoots,
+  };
+}
+
+function MindmapCanvas({ root, collapsedById, heightClassName }) {
+  const containerRef = useRef(null);
+  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const dragRef = useRef({ dragging: false, startX: 0, startY: 0, baseX: 0, baseY: 0 });
+
+  const MIN_ZOOM = 0.3;
+  const MAX_ZOOM = 3.0;
+
+  const NODE_W = 220;
+  const NODE_H = 76;
+  const MARGIN = 240;
+  const X_GAP = NODE_W + 120;
+  const Y_GAP = NODE_H + 52;
+
+  const nodesAndEdges = useMemo(() => {
+    if (!root) return { nodes: [], edges: [], bounds: null };
+
+    const nodes = [];
+    const edges = [];
+    const isCollapsed = (id) => !!collapsedById?.[id];
+
+    let nextY = 0;
+    const build = (node, depth, parentId) => {
+      const children = !isCollapsed(node.id) ? node.children || [] : [];
+
+      let y;
+      if (children.length === 0) {
+        y = nextY;
+        nextY += Y_GAP;
+      } else {
+        const childYs = children.map((c) => build(c, depth + 1, node.id));
+        const minY = Math.min(...childYs);
+        const maxY = Math.max(...childYs);
+        y = (minY + maxY) / 2;
+      }
+
+      const x = depth * X_GAP;
+      nodes.push({ id: node.id, node, parentId, x, y, depth });
+      if (parentId) edges.push({ from: parentId, to: node.id });
+      return y;
+    };
+
+    build(root, 0, null);
+
+    const rootEntry = nodes.find((n) => n.id === root.id);
+    const shiftY = rootEntry?.y ?? 0;
+    nodes.forEach((n) => {
+      n.y -= shiftY;
+    });
+
+    if (nodes.length === 0) return { nodes: [], edges: [], bounds: null };
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    nodes.forEach((n) => {
+      minX = Math.min(minX, n.x - NODE_W / 2);
+      maxX = Math.max(maxX, n.x + NODE_W / 2);
+      minY = Math.min(minY, n.y - NODE_H / 2);
+      maxY = Math.max(maxY, n.y + NODE_H / 2);
+    });
+
+    const bounds = { minX: minX - MARGIN, maxX: maxX + MARGIN, minY: minY - MARGIN, maxY: maxY + MARGIN };
+    return { nodes, edges, bounds };
+  }, [root, collapsedById]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    setViewport({ x: rect.width / 2, y: rect.height / 2, scale: 1 });
+  }, [root?.id]);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const onWheel = (e) => {
+      if (!e || e.deltaY === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const rect = el.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      const sensitivity = e.ctrlKey ? 0.004 : 0.0012;
+      const zoom = Math.exp(-e.deltaY * sensitivity);
+
+      setViewport((v) => {
+        const nextScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, v.scale * zoom));
+        const scaleRatio = nextScale / v.scale;
+        const nextX = mouseX - (mouseX - v.x) * scaleRatio;
+        const nextY = mouseY - (mouseY - v.y) * scaleRatio;
+        return { x: nextX, y: nextY, scale: nextScale };
+      });
+    };
+
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const onPointerDown = (e) => {
+    const el = containerRef.current;
+    if (!el) return;
+    dragRef.current.dragging = true;
+    dragRef.current.startX = e.clientX;
+    dragRef.current.startY = e.clientY;
+    dragRef.current.baseX = viewport.x;
+    dragRef.current.baseY = viewport.y;
+    el.setPointerCapture?.(e.pointerId);
+  };
+
+  const onPointerMove = (e) => {
+    if (!dragRef.current.dragging) return;
+    const dx = e.clientX - dragRef.current.startX;
+    const dy = e.clientY - dragRef.current.startY;
+    setViewport((v) => ({ ...v, x: dragRef.current.baseX + dx, y: dragRef.current.baseY + dy }));
+  };
+
+  const onPointerUp = (e) => {
+    dragRef.current.dragging = false;
+    containerRef.current?.releasePointerCapture?.(e.pointerId);
+  };
+
+  const svgEdges = useMemo(() => {
+    if (!nodesAndEdges.edges.length) return null;
+    const byId = new Map(nodesAndEdges.nodes.map((n) => [n.id, n]));
+    return (
+      <svg className="absolute left-0 top-0" style={{ width: 1, height: 1, overflow: "visible" }}>
+        {nodesAndEdges.edges.map((e, i) => {
+          const from = byId.get(e.from);
+          const to = byId.get(e.to);
+          if (!from || !to) return null;
+          const x1 = from.x + NODE_W / 2;
+          const y1 = from.y;
+          const x2 = to.x - NODE_W / 2;
+          const y2 = to.y;
+          const c1 = x1 + 60;
+          const c2 = x2 - 60;
+          const d = `M ${x1} ${y1} C ${c1} ${y1}, ${c2} ${y2}, ${x2} ${y2}`;
+          return <path key={i} d={d} stroke="rgba(34,211,238,0.35)" strokeWidth="2" fill="none" />;
+        })}
+      </svg>
+    );
+  }, [nodesAndEdges.nodes, nodesAndEdges.edges]);
+
+  return (
+    <div
+      ref={containerRef}
+      className={`relative w-full rounded-2xl border border-white/10 bg-black/20 overflow-hidden select-none ${
+        heightClassName ?? "h-[420px]"
+      }`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerLeave={onPointerUp}
+    >
+      <div className="absolute right-3 top-3 z-10 text-[11px] px-2 py-1 rounded-full bg-black/40 border border-white/10 text-slate-200">
+        <span className="font-mono">Pan: drag</span> <span className="opacity-60">|</span>{" "}
+        <span className="font-mono">Zoom: wheel</span>
+      </div>
+
+      <div
+        className="absolute left-0 top-0 origin-[0_0]"
+        style={{ transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }}
+      >
+        {svgEdges}
+        {nodesAndEdges.nodes.map((n) => {
+          const node = n.node;
+          return (
+            <div
+              key={node.id}
+              className="absolute rounded-2xl border border-cyan-300/30 bg-[#0c111f] px-3 py-2 text-left shadow-sm"
+              style={{ left: n.x - NODE_W / 2, top: n.y - NODE_H / 2, width: NODE_W, height: NODE_H }}
+              title={node.summary || node.title}
+            >
+              <div className="text-xs font-semibold text-slate-50 truncate">{node.title || "Untitled"}</div>
+              {node.summary ? (
+                <div className="mt-1 text-[11px] text-slate-300 line-clamp-2">{node.summary}</div>
+              ) : (
+                <div className="mt-1 text-[11px] text-slate-500 italic">No summary.</div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -411,8 +658,8 @@ function TranscriptBlock({ transcript, duration, onSeek, onCopy }) {
 /* ---------- Main App ---------- */
 
 export default function App() {
-  const [selectedAnswers, setSelectedAnswers] = useState({});
   const [flippedCards, setFlippedCards] = useState({});
+  const [quizPickByIndex, setQuizPickByIndex] = useState({});
 
   const [url, setUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -421,6 +668,8 @@ export default function App() {
   const [tab, setTab] = useState("quick");
   const [flashOpen, setFlashOpen] = useState(false);
   const [quizOpen, setQuizOpen] = useState(false);
+  const [mindmapCollapsedById, setMindmapCollapsedById] = useState({});
+  const [mindmapModalOpen, setMindmapModalOpen] = useState(false);
   const [chatHistory, setChatHistory] = useState([]);
   const [sourceTab, setSourceTab] = useState("youtube");
   const [inputFocused, setInputFocused] = useState(false);
@@ -446,19 +695,33 @@ export default function App() {
     return [v];
   };
 
-  const normalizedMindmap = (() => {
+  const mindmapRoot = useMemo(() => {
     const mapData = result?.mindmap;
-    if (!mapData) return [];
-    if (Array.isArray(mapData)) return mapData;
-    if (typeof mapData === "object") return [mapData];
-    return [];
-  })();
+    const roots = !mapData ? [] : Array.isArray(mapData) ? mapData : typeof mapData === "object" ? [mapData] : [];
+    return buildMindmapRoot(roots, result?.title || "Mind Map");
+  }, [result]);
+
+  useEffect(() => {
+    setMindmapCollapsedById({});
+    setMindmapModalOpen(false);
+  }, [mindmapRoot?.id]);
 
   const chapters = safePoints(result?.chapters);
   const tags = safeArray(result?.tags);
   const terms = safeTerms(result?.terminologies);
   const flashcardCount = safeArray(result?.flashcards).length;
   const quizCount = safeArray(result?.quiz).length;
+
+  useEffect(() => {
+    if (quizOpen) setQuizPickByIndex({});
+  }, [quizOpen, quizCount]);
+
+  const pickQuizOption = (questionIndex, choice) => {
+    setQuizPickByIndex((prev) => {
+      if (prev[questionIndex] !== undefined) return prev;
+      return { ...prev, [questionIndex]: choice };
+    });
+  };
 
   const transcriptText = (() => {
     const t = result?.transcript || result?.transcript_text || result?.full_transcript;
@@ -1193,20 +1456,29 @@ export default function App() {
                     {/* MINDMAP TAB */}
                     {tab === "mindmap" && (
                       <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-                        <div className="flex flex-col gap-2">
-                          <div className="flex items-center justify-between">
-                            <h3 className="text-sm font-semibold">Mind Map</h3>
-                            <span className="text-[11px] text-slate-400">{normalizedMindmap.length} roots</span>
-                          </div>
-                          <p className="text-xs text-slate-400">Outline of the main knowledge branches.</p>
+                        <div className="flex items-center justify-between gap-3 flex-wrap">
+                          <h3 className="text-sm font-semibold">Mind Map</h3>
+                          <button
+                            onClick={() => {
+                              setMindmapCollapsedById({});
+                              setMindmapModalOpen(true);
+                            }}
+                            disabled={!mindmapRoot}
+                            className={`text-[11px] px-3 py-1.5 rounded-full bg-black border border-white/10 text-slate-200 ${
+                              mindmapRoot ? "hover:border-cyan-300/60" : "opacity-50 cursor-not-allowed"
+                            }`}
+                          >
+                            Expand
+                          </button>
                         </div>
-                        {normalizedMindmap.length === 0 ? (
-                          <div className="mt-3 rounded-xl border border-dashed border-white/10 bg-white/5 p-4 text-sm text-slate-400 italic">No mindmap was generated for this content.</div>
+
+                        {!mindmapRoot ? (
+                          <div className="mt-3 rounded-xl border border-dashed border-white/10 bg-white/5 p-4 text-sm text-slate-400 italic">
+                            No mindmap was generated for this content.
+                          </div>
                         ) : (
-                          <div className="mt-3 space-y-4">
-                            {normalizedMindmap.map((node, i) => (
-                              <MindmapNode key={i} node={node} />
-                            ))}
+                          <div className="mt-3">
+                            <MindmapCanvas root={mindmapRoot} collapsedById={mindmapCollapsedById} />
                           </div>
                         )}
                       </div>
@@ -1407,40 +1679,60 @@ export default function App() {
                 </div>
                 <div className="mt-2 font-semibold text-sm text-white">{q.q ?? q.question ?? `Question ${i + 1}`}</div>
                 <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {safeArray(q.choices).map((c, j) => {
-                    const picked = selectedAnswers[i] === j;
-                    const isCorrect = c === q.answer;
-
-                    return (
-                      <button
-                        key={j}
-                        onClick={() =>
-                          setSelectedAnswers({ ...selectedAnswers, [i]: j })
-                        }
-                        className={`px-3 py-2 rounded-lg text-xs border ${
-                          picked
-                            ? isCorrect
-                              ? "bg-green-500/30 border-green-400"
-                              : "bg-red-500/30 border-red-400"
-                            : "bg-white/5 border-white/10"
-                        }`}
-                      >
-                        {c}
-                      </button>
-                    );
-
-                    
-                  })}
+                  {safeArray(q.choices)
+                    .filter((c) => c !== undefined && c !== null)
+                    .slice(0, 4)
+                    .map((c, j) => {
+                      const picked = quizPickByIndex[i];
+                      const revealed = picked !== undefined && picked !== null;
+                      const isAnswer = c === q.answer;
+                      const isPicked = c === picked;
+                      return (
+                        <button
+                          key={j}
+                          type="button"
+                          disabled={revealed}
+                          onClick={() => pickQuizOption(i, c)}
+                          className={`px-3 py-2 rounded-lg text-xs font-semibold border backdrop-blur-sm transition ${
+                            !revealed
+                              ? "border-white/10 bg-white/5 text-slate-200 hover:border-purple-300/50 hover:bg-purple-500/10"
+                              : isAnswer
+                                ? "border-emerald-300/80 bg-emerald-400/15 text-emerald-50 shadow-[0_6px_25px_rgba(16,185,129,0.20)]"
+                                : isPicked
+                                  ? "border-rose-300/80 bg-rose-500/15 text-rose-50 shadow-[0_6px_25px_rgba(244,63,94,0.18)]"
+                                  : "border-white/10 bg-white/5 text-slate-300 opacity-70"
+                          }`}
+                        >
+                          {c}
+                        </button>
+                      );
+                    })}
                 </div>
-                {selectedAnswers[i] !== undefined && (
-                  <div className="mt-3 text-xs text-cyan-200 font-semibold">
-                    Correct answer:{" "}
-                    <span className="text-cyan-100">{q.answer}</span>
+                {quizPickByIndex[i] === undefined ? (
+                  <div className="text-xs text-slate-300 mt-3">Pick an option to reveal the answer.</div>
+                ) : (
+                  <div className="text-xs text-slate-300 mt-3">
+                    Correct answer is highlighted in green{quizPickByIndex[i] === q.answer ? "." : "; your pick is red."}
                   </div>
                 )}
               </div>
             </div>
           ))
+        )}
+      </Modal>
+
+      {/* Mindmap modal */}
+      <Modal
+        title="Mind Map"
+        open={mindmapModalOpen}
+        onClose={() => setMindmapModalOpen(false)}
+        panelClassName="w-[92vw] max-w-none h-[90vh]"
+        bodyClassName="p-4 flex-1 overflow-hidden"
+      >
+        {!mindmapRoot ? (
+          <div className="text-sm text-slate-300 italic">No mindmap was generated for this content.</div>
+        ) : (
+          <MindmapCanvas root={mindmapRoot} collapsedById={mindmapCollapsedById} heightClassName="h-full" />
         )}
       </Modal>
     </div>
